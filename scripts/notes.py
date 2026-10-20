@@ -496,9 +496,6 @@ def cmd_done(a):
     if a.outcome:
         n.meta["outcome"] = a.outcome
     save_checked(n, notes)
-    if n.type == "experiment" and not cited_by_projects(notes)[n.id]:
-        print("now cite [[%s]] in the ## Findings of: %s" % (
-            n.id, ", ".join(t for r, t, _ in n.links if r == "part_of")))
 
 
 def cmd_show(a):
@@ -521,7 +518,7 @@ def cmd_report(a):
     groups = [
         ("Open experiments", [n for n in notes.values() if n.type == "experiment" and n.status == "open"]),
         ("Open decisions", [n for n in notes.values() if n.type == "decision" and n.status == "open"]),
-        ("Done experiments not cited by any project's Findings", uncited(notes)),
+        ("Done experiments not (yet) cited by any project's Findings", uncited(notes)),
         ("Untested hypotheses", [n for n in notes.values() if n.type == "hypothesis"
                                  and not any(r in verdict for r, _, _ in inc[n.id])]),
     ]
@@ -537,7 +534,6 @@ def cmd_check(a):
     notes, errors = load_all()
     for n in notes.values():
         errors += ["%s: %s" % (relpath(n.path), e) for e in validate(n, notes)]
-    errors += ["%s: done but not cited in any project's Findings" % relpath(n.path) for n in uncited(notes)]
     errors += cycle_errors(notes) + frozen_errors()
     for e in errors:
         print(e)

@@ -44,7 +44,7 @@ python3 scripts/notes.py link high-res-innovation-diagnostic supports head-wave-
   --note "innovation peaks at head segments"
 python3 scripts/notes.py done high-res-innovation-diagnostic --outcome succeeded
 ```
-Then **update the `## Findings` of every project the experiment is part of**, citing it inline. `check` fails until you do. Add a new finding, or extend or revise an existing one; if the result changes an earlier finding, rewrite that finding and cite both experiments.
+Then consider whether the result changes the `## Findings` of the projects it is part of. Experiments are granular and most will not need a finding of their own. Update the Findings when a result adds, strengthens or overturns a project-level claim: add a finding, or revise an existing one and cite the experiments it now rests on. `report` lists finished experiments that no Findings cite, which is useful when reviewing a project.
 
 `run` must be `repository@commit:path` with a real commit hash (`git -C <repo> rev-parse --short HEAD`), never a branch. If the run used uncommitted code, tell the user rather than citing a commit that doesn't match.
 
@@ -68,8 +68,9 @@ Commit only when the user asks, or when they have asked you to maintain the repo
 
 ## Writing notes
 
+- **Granular is fine.** Small runs, checks and diagnostics each get their own experiment note.
 - **One run, one experiment.** A parameter sweep launched as one job is one experiment. Separate follow-up runs are separate experiments, linked with `depends_on` or `motivated_by`.
-- **Conclusion is the important part.** One to three sentences that a project's Findings can cite. Say what the result means, not only what the numbers are.
+- **Conclusion is the important part.** One to three sentences, readable on their own. Say what the result means, not only what the numbers are.
 - **Numbers with their context:** effect size, n (animals, recordings), and whether it is the exploration subset or the full cohort.
 - **Caveats are required**, even if they are "none known".
 - **Failed and ambiguous results are worth recording.** They stop the same thing being redone. Say what would make it worth retrying.

@@ -54,7 +54,7 @@ Every experiment and decision is `part_of` at least one project, and may be part
 
 ### `ideas/`: projects and hypotheses
 
-Each project page has a `## Findings` section: the project's current conclusions, each citing the experiments it rests on with inline links, e.g. `The head wave is driven at the head ([[high-res-innovation-diagnostic]]).` Findings may be revised as understanding changes, because the evidence they cite is frozen; Git history keeps earlier versions.
+Each project page has a `## Findings` section: the project's current conclusions, each citing the experiments it rests on with inline links. Findings are coarser than experiments: one finding usually rests on several experiments, and many small experiments are never cited directly. For example: `The head wave is driven at the head ([[high-res-innovation-diagnostic]]).` Findings may be revised as understanding changes, because the evidence they cite is frozen; Git history keeps earlier versions.
 
 Each project page also has a `## Decisions` section linking the decisions that shape the project. Small practical decisions need not be listed there by hand: they are `part_of` the project, so they appear in the graph, the backlinks panel and the section's Dataview block.
 
@@ -69,10 +69,11 @@ Narrative tied to one codebase (papers in progress, documents such as `FRAMEWORK
 `scripts/notes.py check` fails if:
 
 - an experiment or decision is not `part_of` any project;
-- a `done` experiment has an empty `## Conclusion`;
-- a `done` experiment is not cited in the `## Findings` of any project.
+- a `done` experiment has an empty `## Conclusion`.
 
-So every finished experiment's conclusion is written down, and surfaces in at least one project page.
+So every finished experiment's conclusion is written down, and every experiment is reachable from a project page through the graph, the backlinks panel and the page's Dataview list. Experiments can therefore be granular; they do not each need a place in the Findings.
+
+`notes.py report` lists finished experiments that no project's Findings cite. It is a prompt for reviewing whether the Findings are current, not a requirement.
 
 ## Frontmatter
 
@@ -176,7 +177,7 @@ Data lives on the shared cluster and is not version-controlled. To make it as st
 ## Rules
 
 - Never rewrite a conclusion or decision. Once a note is `done`, a new note of the same type `supersedes` it.
-- Every finished experiment is cited in at least one project's `## Findings`.
+- Every experiment and decision is `part_of` at least one project, and every finished experiment has a written conclusion.
 - Evidence always cites a commit hash, never a branch.
 - Use only the defined types, statuses, outcomes and relations.
 - Use filename-based Obsidian links between notes, e.g. `[[high-res-innovation-diagnostic]]`. An `id` never changes after creation.
