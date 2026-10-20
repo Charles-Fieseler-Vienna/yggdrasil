@@ -218,3 +218,33 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Research notes: this repo is text only. Figures live in project repos and are
+# referenced as repository@commit:path.
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.pdf
+*.tif
+*.tiff
+*.npy
+*.npz
+*.h5
+*.nwb
+.obsidian/workspace*.json
+
+# Editor, IDE and shell files (some are sandbox mounts in Claude Code sessions)
+.idea
+.vscode
+.mcp.json
+.gitconfig
+.gitmodules
+.bash_profile
+.bashrc
+.profile
+.zprofile
+.zshrc
+.ripgreprc
+.claude/settings.local.json
