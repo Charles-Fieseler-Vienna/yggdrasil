@@ -234,7 +234,7 @@ When a project or phase is finished, `ygg compress PATH` (run in this repository
 | `ygg sync` | Regenerates `projects:` and fills in TaskNotes dates missing from notes made in Obsidian. |
 | `ygg compress PATH [--dry-run]` | Outlines a project tree and records it as a Source at its commit; refuses uncommitted trees. |
 | `ygg view [--project P] [--around NOTE --depth N] [--hide TYPE] [--where KEY=VALUE]` | Writes `views/NAME.canvas`, the selection laid out as a tree with gaps highlighted (see [Canvas views](#canvas-views)). |
-| `ygg pull CANVAS` / `ygg watch [CANVAS...]` | Makes the notes and edges drawn on a canvas into nodes and relations, once or whenever it changes. |
+| `ygg pull CANVAS` / `ygg watch [CANVAS...]` | Makes the notes and edges drawn on a canvas into nodes and relations, once or whenever it changes; watch also reflows the canvas when groups are folded. `ygg view` starts a watch on its canvas unless given `--no-watch`. |
 | `ygg check` | Validates everything; exits 1 on any error. |
 | `ygg schema [--out FILE]` | Prints the schema as a DG export file. |
 
@@ -257,12 +257,12 @@ Notes are named by filename, by the content after the type prefix, by `nodeInsta
 
 `ygg view` writes an Obsidian Canvas to `views/` (gitignored). Each node is a file card and each relation a directed edge labelled with its relation, from source to target. The layout is a tree, left to right: questions lead to their follow-ups, claims and informing evidence, claims to their evidence, and evidence to the sources and datasets it is derived from. A node shared by several parents sits under the first; the other edges are still drawn.
 
-Each question, claim or evidence with anything under it gets a group, nested like the tree, holding what only it leads to; its label counts the gaps inside. With the Advanced Canvas plugin the groups fold. By default only the top questions are unfolded (`--open N` unfolds N levels of questions, `--open all` everything); claim, evidence and shared groups start folded. Without Advanced Canvas, folded cards are invisible, so use `--open all`. Group membership is spatial, and collapsing hides the cards inside and every edge touching them, so nodes reached from several questions (usually shared sources and datasets) go in a separate *Shared by several questions* group on the right, where collapsing one question cannot hide them. Advanced Canvas keeps collapsed cards and edges inside the group in the `.canvas` file (`collapsedData`); `ygg pull` reads them there.
+Each question, claim or evidence with anything under it gets a group, nested like the tree, holding what only it leads to. The node itself sits just outside, tied to the group by a dotted connector, so it and its edge to its parent stay visible when the group folds. The group's label counts the notes and gaps inside. With the Advanced Canvas plugin the groups fold. By default only the top questions are unfolded (`--open N` unfolds N levels of questions, `--open all` everything); claim, evidence and shared groups start folded. Without Advanced Canvas, folded cards are invisible, so use `--open all`. A folded group takes one card's room, so the layout is compact for what is open; its contents keep a full layout inside it. Group membership is spatial, and collapsing hides the cards inside and every edge touching them, so nodes reached from several questions (usually shared sources and datasets) go in a separate *Shared by several questions* group on the right, where collapsing one question cannot hide them. Advanced Canvas keeps collapsed cards and edges inside the group in the `.canvas` file (`collapsedData`); `ygg pull` reads them there.
 
 Card colours mark what needs work:
 
 - **red**, a gap: a Question nothing addresses or informs, a Claim without supporting Evidence, or Evidence not derived from any Source or Dataset;
-- **orange**: open or in progress;
+- **blue**: open or in progress;
 - **yellow**: low confidence, refuted, or a failed or ambiguous outcome.
 
 `--where KEY=VALUE` (on frontmatter, or `type`) keeps the matching nodes and the path above them, so `--where confidence=low` shows each weak claim in context.
@@ -274,6 +274,6 @@ The canvas can be edited in Obsidian: drag existing notes on, make new cards wit
 - relations already in `relations.json` are skipped, so pulling twice is harmless;
 - a relation between two cards with no edge drawn is reported, never removed. Use `ygg unlink`.
 
-`ygg watch` polls `views/` (every 2 s by default) and pulls a canvas once it and any new note on it have been untouched for `--settle` seconds (default 5), so a card or label still being typed is left alone. Neither command writes the canvas, so it can stay open. `ygg view` refuses to overwrite a canvas with edits not yet pulled, unless given `--force`.
+`ygg view` saves its selection next to the canvas (`views/.NAME.json`) and then runs `ygg watch` on it until Ctrl-C. Watch polls every 2 s and pulls a canvas once it and any new note on it have been untouched for `--settle` seconds (default 5), so a card or label still being typed is left alone. When a group is folded or unfolded (after 1 s), or a pull adds notes or relations, watch also **reflows** the canvas: it renders the view again with each group's current fold state and rewrites the file, so unfolding a group makes room for it and folding one closes the gap. Obsidian does not reload an open canvas changed on disk by itself; the Refresh Any View plugin makes it do so. Reflow never drops anything: while the canvas holds a card outside the view, a card ygg did not make, or an edge that is not yet a relation, it waits and says why. `--no-reflow` turns it off. A lock file (`views/.NAME.lock`) keeps two watches from pulling the same canvas. `ygg pull` never writes the canvas. `ygg view` refuses to overwrite a canvas with edits not yet pulled, unless given `--force`.
 
 `scripts/hooks/pre-commit` runs `check`. Enable it with `git config core.hooksPath scripts/hooks`.

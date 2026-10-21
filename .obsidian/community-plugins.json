@@ -2,5 +2,6 @@
   "discourse-graphs",
   "datacore",
   "tasknotes",
-  "advanced-canvas"
+  "advanced-canvas",
+  "refresh-preview"
 ]
