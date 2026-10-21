@@ -1104,7 +1104,7 @@ def cmd_schema(a):
 # `ygg pull` and `ygg watch` bring the notes and edges drawn on it back as nodes and
 # relations. They never write the canvas, so it can stay open in Obsidian.
 
-CARD_W, CARD_H, GAP_X, GAP_Y = 420, 260, 160, 40
+CARD_W, CARD_H, GAP_X, GAP_Y, GROUP_PAD = 420, 260, 160, 40, 50
 GAP_COLOR, OPEN_COLOR, WEAK_COLOR = "1", "2", "3"  # canvas presets: red, orange, yellow
 EDGE_COLOR = {"supports": "4", "opposes": "1"}
 INFERABLE = [r for r in RELATIONS if r not in ("supersedes", "blocked-by")]
@@ -1176,16 +1176,32 @@ def select_nodes(vault, projects, around, depth, hide, where):
 
 
 def layout(vault, sel, roots):
-    """Map stem -> (x, y): a tidy tree, left to right, each node under the first parent that reaches it."""
-    children, has_parent = defaultdict(list), set()
+    """Lay sel out as a tidy tree, left to right, each node under the first parent that reaches it.
+
+    Each question with anything under it gets a group, nested like the questions, holding the
+    claims, evidence and sources only it leads to. Nodes reached from several questions go in
+    a shared group to the right, so collapsing one question never hides another's nodes.
+    Returns ({stem: (x, y)}, [(question stem or None, label, (x0, y0, x1, y1))]).
+    """
+    children = defaultdict(list)
     for rel, s, d in vault.edges():
         if rel != "blocked-by" and s.stem in sel and d.stem in sel:
             p, c = layout_pair(rel, s, d)
             children[p.stem].append(c)
-            has_parent.add(c.stem)
+    owners = defaultdict(set)
+    for q in sel:
+        if vault.nodes[q].type == "question":
+            stack = [q]
+            while stack:
+                for c in children[stack.pop()]:
+                    if c.type != "question" and q not in owners[c.stem]:
+                        owners[c.stem].add(q)
+                        stack.append(c.stem)
+    shared = {s for s, o in owners.items() if len(o) > 1}
+    has_parent = {c.stem for p, cs in children.items() if p not in shared for c in cs if c.stem not in shared}
     key = lambda n: (NODE_TYPES.index(n.type), str(n.meta.get("dateCreated")), n.stem)
-    ordered = [n.stem for n in sorted((vault.nodes[s] for s in sel), key=key)]
-    starts = [r for r in roots if r in sel] + [s for s in ordered if s not in has_parent] + ordered
+    ordered = [n.stem for n in sorted((vault.nodes[s] for s in sel - shared), key=key)]
+    starts = [r for r in roots if r in sel and r not in shared] + [s for s in ordered if s not in has_parent] + ordered
     tree, depth, tops = defaultdict(list), {}, []
     for r in starts:
         if r in depth:
@@ -1195,13 +1211,16 @@ def layout(vault, sel, roots):
         while queue:
             v = queue.pop(0)
             for c in sorted(children[v], key=key):
-                if c.stem not in depth:
+                if c.stem not in depth and c.stem not in shared:
                     depth[c.stem] = depth[v] + 1
                     tree[v].append(c.stem)
                     queue.append(c.stem)
+    grouped = lambda v: vault.nodes[v].type == "question" and tree[v]
     y, cursor = {}, [0]
 
     def place(v):
+        if grouped(v):
+            cursor[0] += GROUP_PAD
         if tree[v]:
             for c in tree[v]:
                 place(c)
@@ -1209,11 +1228,40 @@ def layout(vault, sel, roots):
         else:
             y[v] = cursor[0]
             cursor[0] += CARD_H + GAP_Y
+        if grouped(v):
+            cursor[0] += GROUP_PAD
 
     for t in tops:
         place(t)
         cursor[0] += CARD_H // 2
-    return {v: (depth[v] * (CARD_W + GAP_X), y[v]) for v in depth}
+    pos = {v: (depth[v] * (CARD_W + GAP_X), y[v]) for v in depth}
+    groups = []
+
+    def extent(v):
+        x, y0 = pos[v]
+        box = [x, y0, x + CARD_W, y0 + CARD_H]
+        for c in tree[v]:
+            b = extent(c)
+            box = [min(box[0], b[0]), min(box[1], b[1]), max(box[2], b[2]), max(box[3], b[3])]
+        if grouped(v):
+            box = [box[0] - GROUP_PAD, box[1] - GROUP_PAD, box[2] + GROUP_PAD, box[3] + GROUP_PAD]
+            groups.append((v, vault.nodes[v].content, tuple(box)))
+        return box
+
+    for t in tops:
+        extent(t)
+    if shared:
+        x0 = max([x + CARD_W for x, _ in pos.values()] + [g[2][2] for g in groups] + [-GAP_X]) + GAP_X + GROUP_PAD
+        types = sorted({vault.nodes[s].type for s in shared}, key=NODE_TYPES.index)
+        rows = defaultdict(int)
+        for n in sorted((vault.nodes[s] for s in shared), key=key):
+            col = types.index(n.type)
+            pos[n.stem] = (x0 + col * (CARD_W + GAP_X), GROUP_PAD + rows[col] * (CARD_H + GAP_Y))
+            rows[col] += 1
+        groups.append((None, "Shared by several questions",
+                       (x0 - GROUP_PAD, 0, x0 + len(types) * (CARD_W + GAP_X) - GAP_X + GROUP_PAD,
+                        max(rows.values()) * (CARD_H + GAP_Y) - GAP_Y + 2 * GROUP_PAD)))
+    return pos, groups
 
 
 def sides(a, b):
@@ -1223,11 +1271,15 @@ def sides(a, b):
 
 
 def build_canvas(vault, sel, roots, title):
-    pos = layout(vault, sel, roots)
+    pos, groups = layout(vault, sel, roots)
     colors = node_colors(vault)
     legend = LEGEND.format(title=title, relations=", ".join(v[0] for v in RELATIONS.values()))
-    nodes = [dict(id="ygg-legend", type="text", text=legend, x=0, y=-CARD_H * 2 - GAP_Y,
+    nodes = [dict(id="ygg-legend", type="text", text=legend, x=0, y=-CARD_H * 2 - 3 * GAP_Y,
                   width=CARD_W * 2, height=CARD_H * 2)]
+    for q, label, (x0, y0, x1, y1) in sorted(groups, key=lambda g: (g[2][2] - g[2][0]) * (g[2][3] - g[2][1]),
+                                             reverse=True):  # larger groups first, so they sit beneath
+        gid = "group-" + (vault.nodes[q].uid if q else "shared")
+        nodes.append(dict(id=gid, type="group", label=label, x=x0, y=y0, width=x1 - x0, height=y1 - y0))
     for stem, (x, y) in pos.items():
         n = vault.nodes[stem]
         card = dict(id=n.uid, type="file", file=n.path.relative_to(vault.root).as_posix(),
@@ -1244,6 +1296,18 @@ def build_canvas(vault, sel, roots, title):
                 e["color"] = EDGE_COLOR[rel]
             edges.append(e)
     return {"nodes": nodes, "edges": edges}
+
+
+def canvas_contents(data):
+    """All nodes and edges of a canvas, including those inside groups collapsed by Advanced Canvas."""
+    nodes, edges = list(data.get("nodes") or []), list(data.get("edges") or [])
+    i = 0
+    while i < len(nodes):
+        hidden = nodes[i].get("collapsedData") or {}
+        nodes += hidden.get("nodes") or []
+        edges += hidden.get("edges") or []
+        i += 1
+    return nodes, edges
 
 
 def norm_label(label):
@@ -1322,7 +1386,8 @@ def pull_canvas(vault, canvas, settle=0, dry_run=False):
     except (OSError, ValueError) as e:
         return [], ["%s: %s" % (vault.rel(canvas), e)], False
     changes, problems, pending, cards = [], [], False, {}
-    for c in data.get("nodes") or []:
+    canvas_nodes, canvas_edges = canvas_contents(data)
+    for c in canvas_nodes:
         f = str(c.get("file") or "")
         if c.get("type") != "file" or not f.endswith(".md"):
             continue
@@ -1345,7 +1410,7 @@ def pull_canvas(vault, canvas, settle=0, dry_run=False):
                 pending = True
     drawn, added = set(), False
     cycles = len(cycle_errors(vault))
-    for e in data.get("edges") or []:
+    for e in canvas_edges:
         s, d = cards.get(e.get("fromNode")), cards.get(e.get("toNode"))
         if s is None or d is None:
             continue
@@ -1432,7 +1497,7 @@ def cmd_view(a):
                 vault.rel(out), name, "\n  ".join(changes)))
     canvas = build_canvas(vault, sel, roots, title)
     write_json(out, canvas)
-    print("%s: %d nodes, %d relations" % (vault.rel(out), len(canvas["nodes"]) - 1, len(canvas["edges"])))
+    print("%s: %d nodes, %d relations" % (vault.rel(out), len(sel), len(canvas["edges"])))
 
 
 def report_pull(changes, problems, prefix=""):

@@ -254,7 +254,11 @@ Notes are named by filename, by the content after the type prefix, by `nodeInsta
 
 ### Canvas views
 
-`ygg view` writes an Obsidian Canvas to `views/` (gitignored). Each node is a file card and each relation a directed edge labelled with its relation, from source to target. The layout is a tree, left to right: questions lead to their follow-ups, claims and informing evidence, claims to their evidence, and evidence to the sources and datasets it is derived from. A node shared by several parents sits under the first; the other edges are still drawn. Card colours mark what needs work:
+`ygg view` writes an Obsidian Canvas to `views/` (gitignored). Each node is a file card and each relation a directed edge labelled with its relation, from source to target. The layout is a tree, left to right: questions lead to their follow-ups, claims and informing evidence, claims to their evidence, and evidence to the sources and datasets it is derived from. A node shared by several parents sits under the first; the other edges are still drawn.
+
+Each question with anything under it gets a group, nested like the questions, holding the claims, evidence and sources only it leads to. With the Advanced Canvas plugin the groups can be collapsed. Group membership is spatial, and collapsing hides the cards inside and every edge touching them, so nodes reached from several questions (usually shared sources and datasets) go in a separate *Shared by several questions* group on the right, where collapsing one question cannot hide them. Advanced Canvas keeps collapsed cards and edges inside the group in the `.canvas` file (`collapsedData`); `ygg pull` reads them there.
+
+Card colours mark what needs work:
 
 - **red**, a gap: a Question nothing addresses or informs, a Claim without supporting Evidence, or Evidence not derived from any Source or Dataset;
 - **orange**: open or in progress;
