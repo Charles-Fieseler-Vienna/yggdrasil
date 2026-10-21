@@ -1,3 +1,5 @@
 [
-  "discourse-graphs"
+  "discourse-graphs",
+  "datacore",
+  "tasknotes"
 ]

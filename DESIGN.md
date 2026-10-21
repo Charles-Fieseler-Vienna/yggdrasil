@@ -36,6 +36,7 @@ yggdrasil/
 ├── templates/        # one DG node template per type (written by `ygg init`)
 ├── relations.json    # every relation; written by the DG plugin or ygg
 ├── ygg.json          # marks the folder as a ygg tree, with its spec version
+├── views/            # canvases written by `ygg view` (gitignored)
 ├── .obsidian/plugins/{discourse-graphs,tasknotes}/data.json   # plugin settings (written by `ygg init`)
 ├── schema/
 │   └── dg-schema-yggdrasil.json   # the same schema as a DG export, for manual import (`ygg schema`)
@@ -231,6 +232,8 @@ When a project or phase is finished, `ygg compress PATH` (run in this repository
 | `ygg report` | Lists work in progress, open nodes, unanswered questions, low-confidence claims and orphans. |
 | `ygg sync` | Regenerates `projects:` and fills in TaskNotes dates missing from notes made in Obsidian. |
 | `ygg compress PATH [--dry-run]` | Outlines a project tree and records it as a Source at its commit; refuses uncommitted trees. |
+| `ygg view [--project P] [--around NOTE --depth N] [--hide TYPE] [--where KEY=VALUE]` | Writes `views/NAME.canvas`, the selection laid out as a tree with gaps highlighted (see [Canvas views](#canvas-views)). |
+| `ygg pull CANVAS` / `ygg watch [CANVAS...]` | Makes the notes and edges drawn on a canvas into nodes and relations, once or whenever it changes. |
 | `ygg check` | Validates everything; exits 1 on any error. |
 | `ygg schema [--out FILE]` | Prints the schema as a DG export file. |
 
@@ -248,5 +251,24 @@ Notes are named by filename, by the content after the type prefix, by `nodeInsta
 - `done` notes are unchanged since `HEAD` (bar `projects:` and `dateModified`), and relations touching them were not removed;
 - `run`, `tree` and `figures` are immutable references; only `.md` files are in `tree/` and `ideas/`;
 - the DG settings hold the ygg types and no sync password, and `ygg.json` matches the tool's spec version.
+
+### Canvas views
+
+`ygg view` writes an Obsidian Canvas to `views/` (gitignored). Each node is a file card and each relation a directed edge labelled with its relation, from source to target. The layout is a tree, left to right: questions lead to their follow-ups, claims and informing evidence, claims to their evidence, and evidence to the sources and datasets it is derived from. A node shared by several parents sits under the first; the other edges are still drawn. Card colours mark what needs work:
+
+- **red**, a gap: a Question nothing addresses or informs, a Claim without supporting Evidence, or Evidence not derived from any Source or Dataset;
+- **orange**: open or in progress;
+- **yellow**: low confidence, refuted, or a failed or ambiguous outcome.
+
+`--where KEY=VALUE` (on frontmatter, or `type`) keeps the matching nodes and the path above them, so `--where confidence=low` shows each weak claim in context.
+
+The canvas can be edited in Obsidian: drag existing notes on, make new cards with *Convert to file* (named with a type prefix, saved in `tree/`, which `ygg init` sets as the default location for new notes), and draw edges. `ygg pull` then makes them into nodes and relations, through the same checks as `ygg new` and `ygg link`:
+
+- a new note gets its type from its prefix, fresh DG and TaskNotes fields, and the type's sections, with any text typed on the card under the first section;
+- an edge's relation comes from its label (the relation's name, label, or complement, which reverses it). An unlabelled edge is inferred when only one relation fits the two types, which is every pair but Evidence → Claim (`supports` or `opposes`). `supersedes` and `blocked by` are never inferred;
+- relations already in `relations.json` are skipped, so pulling twice is harmless;
+- a relation between two cards with no edge drawn is reported, never removed. Use `ygg unlink`.
+
+`ygg watch` polls `views/` (every 2 s by default) and pulls a canvas once it and any new note on it have been untouched for `--settle` seconds (default 5), so a card or label still being typed is left alone. Neither command writes the canvas, so it can stay open. `ygg view` refuses to overwrite a canvas with edits not yet pulled, unless given `--force`.
 
 `scripts/hooks/pre-commit` runs `check`. Enable it with `git config core.hooksPath scripts/hooks`.

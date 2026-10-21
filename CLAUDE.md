@@ -45,6 +45,8 @@ ygg compress ~/Current_work/repos/Cosyne_2027/research/tree      # prints the ou
 ```
 Then write the compressed nodes with `ygg new`: about one Question per figure, one Claim per one to three panels, each Claim with its own Evidence derived from the tree Source and the Dataset. Keep generalizable results, dead ends and open questions; leave narrow methods details in the project tree. Add the root nodes with `ygg set PROJECT --add-root NOTE`.
 
+**Viewing and editing on a canvas.** `ygg view --project control-decomposition` writes `views/control-decomposition.canvas`, a tree with gaps in red. The user may edit it in Obsidian; `ygg pull NAME` (or a running `ygg watch`) turns new prefixed notes and drawn edges into nodes and relations, and reports anything it cannot. Never edit a canvas to make changes yourself; use `ygg new` and `ygg link`.
+
 **Changing a conclusion.** Never edit a `done` node. Create a new node of the same type with `--link supersedes:OLD`, saying what changed and why, then update the project's Findings.
 
 **Finishing up.**
