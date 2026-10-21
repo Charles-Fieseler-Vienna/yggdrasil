@@ -34,11 +34,10 @@ def tree_version(root):
 
 
 def graph_json(ygg, vault):
-    flags = {ygg.GAP_COLOR: "gap", ygg.OPEN_COLOR: "open", ygg.WEAK_COLOR: "weak"}
-    colors = ygg.node_colors(vault)
+    flags = ygg.node_flags(vault)
     nodes = [{"id": n.uid, "stem": n.stem, "title": n.content, "type": n.type, "status": n.status,
               "confidence": n.meta.get("confidence"), "outcome": n.meta.get("outcome"),
-              "flag": flags.get(colors.get(n.stem)),
+              "flag": flags.get(n.stem),
               "projects": [ygg.unlink_name(p) for p in n.meta.get("projects") or []],
               "file": n.path.relative_to(vault.root).as_posix()}
              for n in vault.nodes.values() if n.uid and n.type]
@@ -119,7 +118,7 @@ class Tree:
 
 
 class TreeFilter(DefaultFilter):
-    """Changes to notes and relations.json; not views/, .obsidian/ or editor temp files."""
+    """Changes to notes and relations.json; not .obsidian/ or editor temp files."""
 
     def __init__(self, root):
         super().__init__()
