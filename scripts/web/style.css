@@ -58,6 +58,7 @@ a { color: var(--accent); cursor: pointer; }
 .app { height: 100%; display: flex; flex-direction: column; }
 main { flex: 1; display: flex; min-height: 0; }
 .graph { flex: 1; min-width: 0; position: relative; }
+.graph .empty { position: absolute; top: 40%; width: 100%; text-align: center; z-index: 5; pointer-events: none; }
 
 /* Toolbar and breadcrumb */
 .toolbar {
@@ -69,6 +70,15 @@ main { flex: 1; display: flex; min-height: 0; }
 .type-toggle input { margin: 0 3px 0 0; vertical-align: -1px; }
 .type-toggle.off .type-chip { opacity: .35; }
 .search { width: 240px; }
+.note-filter { display: flex; gap: 4px; align-items: center; }
+.note-filter.on select:first-child { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+.note-filter input[type=text] { width: 110px; }
+.note-filter .count { font-size: 12px; }
+.match-list { list-style: none; padding: 0; margin: 0; font-size: 13px; }
+.match-list li { padding: 4px 0; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: baseline; }
+.match-list a { color: var(--fg); flex: 1; }
+.match-list a:hover { color: var(--accent); }
+.match-list .when { font-size: 12px; white-space: nowrap; }
 .legend { margin-left: auto; display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 12px; }
 .flag { border: 2px solid; border-radius: 4px; padding: 0 5px; }
 .flag.gap { border-color: var(--gap); }
@@ -106,6 +116,8 @@ main { flex: 1; display: flex; min-height: 0; }
 .note.hidden-gaps { --ring: 0 0 0 7px color-mix(in srgb, var(--gap) 22%, transparent); }
 .note.selected { outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 4px; }
 .note.connecting { outline: 3px dashed var(--accent); outline-offset: 5px; }
+.note.context { opacity: .5; }
+.note.context:hover { opacity: 1; }
 .note .react-flow__handle { opacity: 0; width: 1px; height: 1px; min-width: 0; min-height: 0; border: 0; }
 
 /* React Flow, themed */
@@ -155,6 +167,8 @@ dialog h3 { margin-top: 0; }
 .field { display: block; margin: 10px 0 0; }
 .field > span { display: block; margin-bottom: 3px; font-size: 13px; color: var(--muted); }
 .field input[type=text], .field select, .field textarea { width: 100%; }
+.paper-ids { display: flex; gap: 6px; }
+.paper-ids input { flex: 1; min-width: 0; }
 .field textarea { min-height: 70px; background: var(--bg); }
 .sections { border: 1px solid var(--line); border-radius: 6px; margin: 14px 0 0; padding: 4px 12px 10px; }
 .sections legend { font-size: 13px; padding: 0 4px; }

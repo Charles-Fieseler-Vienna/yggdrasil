@@ -1,12 +1,12 @@
 // The ygg web app: the tree as a foldable graph, with a side panel and dialogs for editing it.
 //
-// State is the graph from the server plus the view: which nodes are unfolded, the filters, and
-// an optional focus (a note shown as the only root, reached along a trail of notes). Everything drawn is derived from those.
+// State is the graph from the server plus the view: which nodes are unfolded, the filters (type,
+// project, and a note filter such as "in progress"), and an optional focus (a note shown as the only root, reached along a trail of notes). Everything drawn is derived from those.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Background, Controls, MiniMap, ReactFlow, ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import { api, storage, watchVersion } from "./api.js";
-import { computeView, defaultUnfolded, descendants, downPath, indexGraph, pathTo, structure } from "./graph.js";
+import { computeView, defaultUnfolded, descendants, downPath, filterMatches, indexGraph, pathTo, structure } from "./graph.js";
 import { bounds } from "./layout.js";
 import { useAnimatedLayout } from "./animate.js";
 import { html } from "./html.js";
@@ -25,6 +25,8 @@ function App() {
   const [unfolded, setUnfolded] = useState(null);   // null: the default for the current filters
   const [hiddenTypes, setHiddenTypes] = useState(new Set());
   const [project, setProject] = useState("");
+  const [filter, setFilterState] = useState(null);   // {kind, since, key, value}, see FILTERS
+  const [filterUnfolded, setFilterUnfolded] = useState(new Set());  // notes whose other children a filter shows
   const [trail, setTrail] = useState([]);            // the focus path, top root first; the focus is last
   const [selected, setSelected] = useState(null);
   const [connectFrom, setConnectFrom] = useState(null);
@@ -43,6 +45,7 @@ function App() {
         setHiddenTypes(new Set(saved.hiddenTypes || []));
         setProject(saved.project || "");
         setTrail(saved.trail || []);
+        setFilterState(saved.filter || null);
       }
       return g;
     });
@@ -70,10 +73,12 @@ function App() {
   const s = useMemo(() => G && structure(G, hiddenTypes, project), [G, hiddenTypes, project]);
   const unf = useMemo(() => unfolded || (s ? defaultUnfolded(G, s) : new Set()), [unfolded, s]);
   const foc = trail.length && s && trail.every((id) => s.inSet.has(id)) ? trail[trail.length - 1] : null;
-  const view = useMemo(() => s && computeView(G, s, unf, foc), [s, unf, foc]);
+  const matches = useMemo(() => s && filterMatches(G, s, filter), [s, filter]);
+  const view = useMemo(() => s && computeView(G, s, unf, foc, matches && { matches, unfolded: filterUnfolded }),
+                       [s, unf, foc, matches, filterUnfolded]);
   useEffect(() => {
-    if (G) storage.set(G.vault, "view", { unfolded: unfolded && [...unfolded], hiddenTypes: [...hiddenTypes], project, trail });
-  }, [G && G.vault, unfolded, hiddenTypes, project, trail]);
+    if (G) storage.set(G.vault, "view", { unfolded: unfolded && [...unfolded], hiddenTypes: [...hiddenTypes], project, trail, filter });
+  }, [G && G.vault, unfolded, hiddenTypes, project, trail, filter]);
 
   // Once a new layout is placed: fit the viewport to it, or centre a note, as the change asked.
   const onPlaced = (to) => {
@@ -111,8 +116,19 @@ function App() {
 
   // --- Changing the view ---
 
+  const setFilter = (f) => {
+    after.current = { fit: true };
+    setFilterUnfolded(new Set());
+    setFilterState(f && f.kind ? f : null);
+  };
+
   const toggleFold = (id) => {
     after.current = { anchor: id };
+    if (matches) {
+      const next = new Set(filterUnfolded);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return setFilterUnfolded(next);
+    }
     const next = new Set(unf);
     if (next.has(id)) next.delete(id); else next.add(id);
     setUnfolded(next);
@@ -138,7 +154,9 @@ function App() {
     const s2 = structure(g, types, proj);
     if (foc && !(s2.inSet.has(foc) && descendants(s2, foc).has(id))) setTrail([]);
     const next = new Set(unfolded || defaultUnfolded(g, s2));
-    for (const x of pathTo(s2, id).slice(0, -1).concat(alsoUnfold)) next.add(x);
+    const path = pathTo(s2, id).slice(0, -1).concat(alsoUnfold);
+    for (const x of path) next.add(x);
+    if (filter) setFilterUnfolded(new Set([...filterUnfolded, ...path]));
     after.current = { center: id };
     setHiddenTypes(types);
     setProject(proj);
@@ -195,7 +213,8 @@ function App() {
   const Dialog = dialog && DIALOGS[dialog.kind];
   return html`
     <div className="app">
-      <${Toolbar} G=${G} project=${project} hiddenTypes=${hiddenTypes}
+      <${Toolbar} G=${G} project=${project} hiddenTypes=${hiddenTypes} filter=${filter} setFilter=${setFilter}
+        matchCount=${matches ? matches.size : null}
         setProject=${(p) => { after.current = { fit: true }; setProject(p); }}
         toggleType=${(t) => {
           const next = new Set(hiddenTypes);
@@ -203,14 +222,19 @@ function App() {
           setHiddenTypes(next);
         }}
         onFind=${find}
-        onFoldDefault=${() => { after.current = { fit: true }; setUnfolded(null); }}
-        onUnfoldAll=${() => { after.current = { fit: true }; setUnfolded(new Set(G.nodes.map((n) => n.id))); }}
+        onFoldDefault=${() => { after.current = { fit: true }; setUnfolded(null); setFilterUnfolded(new Set()); }}
+        onUnfoldAll=${() => {
+          after.current = { fit: true };
+          const all = new Set(G.nodes.map((n) => n.id));
+          if (matches) setFilterUnfolded(all); else setUnfolded(all);
+        }}
         onFit=${() => flow.fitView({ padding: 0.12, duration: 250 })}
         onNewRoot=${() => setDialog({ kind: "root", project })} />
       <${Breadcrumb} G=${G} path=${foc ? trail : null} onFocus=${focusOn}
         onReset=${() => { after.current = { fit: true }; setTrail([]); setUnfolded(null); }} />
       <main>
         <div className="graph">
+          ${matches && !view.nodes.length ? html`<div className="empty muted">No notes match this filter.</div>` : null}
           <${ReactFlow} nodes=${nodes} edges=${edges} nodeTypes=${nodeTypes} edgeTypes=${edgeTypes}
             nodesDraggable=${false} nodesConnectable=${false} elementsSelectable=${false}
             minZoom=${0.1} maxZoom=${2.5} proOptions=${{ hideAttribution: true }} zoomOnDoubleClick=${false}
@@ -228,7 +252,7 @@ function App() {
             <${MiniMap} pannable zoomable nodeColor=${(n) => n.data.color} nodeStrokeWidth=${0} />
           </${ReactFlow}>
         </div>
-        <${Panel} G=${G} id=${selected} onReveal=${reveal} onFocus=${focusOn} onAction=${action} onUnlink=${unlink} />
+        <${Panel} G=${G} id=${selected} matches=${matches} onReveal=${reveal} onFocus=${focusOn} onAction=${action} onUnlink=${unlink} />
       </main>
       ${connectFrom ? html`
         <div className="banner">Click the note to connect “${G.byId.get(connectFrom).title}” to.

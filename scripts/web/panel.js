@@ -18,7 +18,25 @@ function renderBody(md) {
   return DOMPurify.sanitize(marked.parse(linked));
 }
 
-export function Panel({ G, id, onReveal, onFocus, onAction, onUnlink }) {
+// With nothing selected and a filter on: its matches, most recently changed first.
+function MatchList({ G, matches, onReveal }) {
+  const list = [...matches].map((id) => G.byId.get(id))
+    .sort((a, b) => String(b.meta.dateModified || "").localeCompare(String(a.meta.dateModified || "")));
+  return html`
+    <aside className="panel">
+      <h3>${list.length} ${list.length === 1 ? "match" : "matches"}, most recently changed first</h3>
+      <ul className="match-list">
+        ${list.map((n) => html`
+          <li key=${n.id}>
+            <span className="type-chip" style=${{ background: G.schema.types[n.type].color }}>${G.schema.types[n.type].name[0]}</span>
+            <a onClick=${() => onReveal(n.id)}>${n.title}</a>
+            <span className="when muted">${String(n.meta.dateModified || "").slice(0, 10)}</span>
+          </li>`)}
+      </ul>
+    </aside>`;
+}
+
+export function Panel({ G, id, matches, onReveal, onFocus, onAction, onUnlink }) {
   const n = id && G.byId.get(id);
   const [body, setBody] = useState({ id: null, html: "" });
   useEffect(() => {
@@ -29,6 +47,7 @@ export function Panel({ G, id, onReveal, onFocus, onAction, onUnlink }) {
     return () => { live = false; };
   }, [id, G.version]);
 
+  if (!n && matches) return html`<${MatchList} G=${G} matches=${matches} onReveal=${onReveal} />`;
   if (!n) {
     return html`<aside className="panel"><p className="muted">
       Select a note to see it here. Ctrl-click (or Cmd-click) a note to fold or unfold what is under it;
@@ -37,7 +56,8 @@ export function Panel({ G, id, onReveal, onFocus, onAction, onUnlink }) {
   const spec = G.schema.types[n.type];
   const done = n.status === "done";
   const fields = [["status", n.status], ["confidence", n.confidence], ["outcome", n.outcome],
-                  ["flag", FLAG_TEXT[n.flag]], ["projects", n.projects.join(", ") || "none"], ["file", n.file]];
+                  ["flag", FLAG_TEXT[n.flag]], ["projects", n.projects.join(", ") || "none"],
+                  ...["zotero", "doi", "citekey", "run", "tree", "location"].map((k) => [k, n.meta[k]]), ["file", n.file]];
   const relations = G.edges.filter((e) => e.source === n.id || e.target === n.id);
   const obsidian = "obsidian://open?vault=" + encodeURIComponent(G.vault) + "&file=" + encodeURIComponent(n.file);
   const clickBody = (e) => {
@@ -59,6 +79,8 @@ export function Panel({ G, id, onReveal, onFocus, onAction, onUnlink }) {
         ${done ? null : html`<button onClick=${() => onAction("set")}>Set…</button>`}
         ${done ? null : html`<button onClick=${() => onAction("done")}>Mark done…</button>`}
         <a href=${obsidian}>Open in Obsidian</a>
+        ${n.meta.zotero ? html`<a href=${"zotero://select/library/items/" + n.meta.zotero}>Open in Zotero</a>` : null}
+        ${n.meta.doi ? html`<a href=${"https://doi.org/" + n.meta.doi} target="_blank" rel="noreferrer">DOI</a>` : null}
       </div>
       <h3>Relations</h3>
       <ul className="relations">

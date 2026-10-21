@@ -75,7 +75,7 @@ TYPE_FIELDS = {
     "question": set(),
     "claim": {"confidence"},
     "evidence": {"confidence", "outcome"},
-    "source": {"run", "run_start", "run_end", "tree", "data", "figures", "citekey"},
+    "source": {"run", "run_start", "run_end", "tree", "data", "figures", "zotero", "doi", "citekey"},
     "dataset": {"location", "n_animals", "n_recordings"},
 }
 OWN_FIELDS = set().union(*TYPE_FIELDS.values())
@@ -87,6 +87,9 @@ DG_PLUGIN = "discourse-graphs"
 TN_PLUGIN = "tasknotes"
 T0 = 1792540800000  # 2026-10-21, creation time stamped on the schema entries
 
+ZOTERO_RE = re.compile(r"^[A-Z0-9]{8}$")
+DOI_RE = re.compile(r"^10\.\d{4,9}/\S+$")
+DOI_PREFIX_RE = re.compile(r"^(https?://(dx\.)?doi\.org/|doi:)", re.I)
 REF_RE = re.compile(r"^[\w.-]+@[0-9a-f]{7,40}:\S+$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$")
@@ -363,6 +366,13 @@ class Vault:
         if "project" in kinds:
             pools.append(self.projects)
         name = unlink_name(name)
+        kind, sep, key = name.partition(":")  # titles cannot hold ":", so zotero:KEY and doi:DOI are safe
+        if sep and kind in ("zotero", "doi") and "node" in kinds:
+            hits = [n for n in self.nodes.values() if paper_ids(n) & {(kind, normalize_paper_id(kind, key))}]
+            if len(hits) == 1:
+                return hits[0]
+            die("no Source has %s %s" % (kind, key) if not hits else
+                "%s %s is on several Sources: %s" % (kind, key, ", ".join(sorted(n.stem for n in hits))))
         for pool in pools:
             if name in pool:
                 return pool[name]
@@ -449,6 +459,20 @@ class Vault:
 
 # --- Validation ----------------------------------------------------------------
 
+def normalize_paper_id(kind, v):
+    v = str(v).strip()
+    if kind == "zotero":
+        return v.upper()
+    return DOI_PREFIX_RE.sub("", v).lower()  # DOIs ignore case
+
+
+def paper_ids(n):
+    """{("zotero", KEY), ("doi", DOI)} that identify the paper a Source stands for."""
+    if n.type != "source":
+        return set()
+    return {(k, normalize_paper_id(k, n.meta[k])) for k in ("zotero", "doi") if n.meta.get(k)}
+
+
 def validate_node(n, vault):
     errs, m, t = [], n.meta, n.type
     if t is None:
@@ -481,6 +505,10 @@ def validate_node(n, vault):
     for k in ("run", "tree"):
         if m.get(k) and not REF_RE.match(str(m[k])):
             errs.append("%s must be repository@commit:path, got %r" % (k, m[k]))
+    if m.get("zotero") and not ZOTERO_RE.match(str(m["zotero"])):
+        errs.append("zotero must be a Zotero item key (8 capital letters or digits), got %r" % m["zotero"])
+    if m.get("doi") and not DOI_RE.match(str(m["doi"])):
+        errs.append("doi must be a bare DOI like 10.1234/abcd, got %r" % m["doi"])
     for k in ("run_start", "run_end"):
         if m.get(k) and not DATETIME_RE.match(str(m[k])):
             errs.append("%s must be an ISO date or datetime" % k)
@@ -579,6 +607,22 @@ def graph_errors(vault):
         want = [wikilink(p) for p in members.get(n.stem, [])]
         if (n.meta.get("projects") or []) != want:
             errs.append("[[%s]]: projects field is stale; run `ygg sync`" % n.stem)
+    return errs
+
+
+def duplicate_paper_errors(vault):
+    """Two Sources for the same paper (same Zotero key or DOI), unless one supersedes the other."""
+    superseded = {(s.stem, d.stem) for rel, s, d in vault.edges() if rel == "supersedes"}
+    by_id = defaultdict(list)
+    for n in vault.nodes.values():
+        for pid in paper_ids(n):
+            by_id[pid].append(n)
+    errs = []
+    for (kind, key), ns in sorted(by_id.items()):
+        live = [n for n in ns if not any((o.stem, n.stem) in superseded for o in ns)]
+        if len(live) > 1:
+            errs.append("%s %s is on several Sources (merge them, or link one to the other with supersedes): %s"
+                        % (kind, key, ", ".join(sorted("[[%s]]" % n.stem for n in live))))
     return errs
 
 
@@ -716,6 +760,9 @@ def default_body(t):
 
 def check_note(n, vault):
     errs = note_errors(n, vault)
+    for o in vault.nodes.values():
+        for kind, key in sorted(paper_ids(n) & paper_ids(o) if o is not n else ()):
+            errs.append("[[%s]] already has %s %s; link to it instead" % (o.stem, kind, key))
     if errs:
         die("%s:\n  " % vault.rel(n.path) + "\n  ".join(errs))
 
@@ -757,9 +804,11 @@ def finish(vault, notes):
 
 
 def apply_fields(n, a):
-    for k in ("priority", "confidence", "scheduled", "run", "run_start", "run_end", "tree", "citekey",
+    for k in ("priority", "confidence", "scheduled", "run", "run_start", "run_end", "tree", "zotero", "doi", "citekey",
               "location", "outcome", "legacy_ref"):
         v = getattr(a, k, None)
+        if v and k in ("zotero", "doi"):
+            v = normalize_paper_id(k, v) if k == "zotero" else DOI_PREFIX_RE.sub("", v.strip())
         if v:
             n.set(k, v)
     for k in ("n_animals", "n_recordings"):
@@ -781,6 +830,8 @@ def cmd_init(a):
         if d != "templates" and not any((root / d).iterdir()):
             (root / d / ".gitkeep").touch()
     write_json(root / "ygg.json", {"spec_version": SPEC_VERSION})
+    if not (root / NOTEBOOK).exists():
+        (root / NOTEBOOK).write_text(NOTEBOOK_HEAD, encoding="utf-8")
     if not (root / "relations.json").exists():
         write_json(root / "relations.json", {"version": 1, "lastModified": 0, "relations": {}})
     for t in TYPES:
@@ -955,13 +1006,87 @@ def cmd_show(a):
         print("- established on: %s" % (", ".join(wikilink(s) for s in scope) or "no dataset"))
 
 
+# --- Notebook --------------------------------------------------------------------
+# NOTEBOOK.md at the tree's root is the project's lab notebook: dated entries, appended and never
+# edited, newest last. ygg only appends to it (`ygg log`), reads entry headings and checks its links.
+
+NOTEBOOK = "NOTEBOOK.md"
+NOTEBOOK_HEAD = """# Notebook
+
+The lab notebook of this project: what was tried, decided, abandoned or guessed, as it happens, before it
+is settled enough to become a node in tree/. Entries are appended, never edited, newest last; add one
+with `ygg log`. A `handoff` entry says where things stand for whoever picks the work up next.
+"""
+ENTRY_RE = re.compile(r"^## (\d{4}-\d{2}-\d{2})(?: (\d{2}:\d{2}))?(?: — (.*))?$", re.M)
+
+
+def notebook_entries(root):
+    """[{when, tag, text}] for each entry of the tree's notebook, oldest first."""
+    path = Path(root) / NOTEBOOK
+    if not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8")
+    heads = list(ENTRY_RE.finditer(text))
+    return [{"when": (h.group(1) + " " + (h.group(2) or "")).strip(), "tag": (h.group(3) or "").strip(),
+             "text": text[h.end():heads[i + 1].start() if i + 1 < len(heads) else len(text)].strip()}
+            for i, h in enumerate(heads)]
+
+
+def last_handoff(root):
+    hand = [e for e in notebook_entries(root) if "handoff" in e["tag"].lower()]
+    return hand[-1]["when"] if hand else None
+
+
+def notebook_warnings(vault):
+    path = vault.root / NOTEBOOK
+    if not path.exists():
+        return []
+    names = set(vault.nodes) | set(vault.projects)
+    return ["%s: [[%s]] does not exist" % (NOTEBOOK, t) for t in inline_links(path.read_text(encoding="utf-8"))
+            if t not in names]
+
+
+def cmd_log(a):
+    vault = open_vault(a)
+    text = (a.text or "").strip() or (read_body(a.body).strip() if a.body else "")
+    if not text:
+        die("give the entry as an argument, or with --body FILE (or - for stdin)")
+    tag = "handoff" if a.handoff else (a.tag or "").strip()
+    stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    path = vault.root / NOTEBOOK
+    old = path.read_text(encoding="utf-8") if path.exists() else NOTEBOOK_HEAD
+    head = "## %s%s" % (stamp, " — " + tag if tag else "")
+    path.write_text(old.rstrip("\n") + "\n\n" + head + "\n\n" + text + "\n", encoding="utf-8")
+    names = set(vault.nodes) | set(vault.projects)
+    for target in inline_links(text):
+        if target not in names:
+            warn("[[%s]] does not exist" % target)
+    print("%s: %s" % (NOTEBOOK, head[3:]))
+
+
+# --- Report ----------------------------------------------------------------------
+
 def cmd_report(a):
     vault = open_vault(a)
     edges = vault.edges()
     answered = {d.stem for rel, s, d in edges if rel in ("addresses", "informs")}
     members = vault.membership()
     nodes = sorted(vault.nodes.values(), key=lambda n: (str(n.meta.get("dateCreated")), n.stem))
+    if a.project:
+        project = vault.resolve(a.project, ("project",))
+        nodes = [n for n in nodes if project.stem in members.get(n.stem, [])]
+    since, entries = a.since, notebook_entries(vault.root)
+    if since == "handoff":
+        since = last_handoff(vault.root)
+        # by position, since entries written in the handoff's minute may come before it
+        hand = [i for i, e in enumerate(entries) if "handoff" in e["tag"].lower()]
+        entries = entries[hand[-1]:] if hand else entries
+        print("Last handoff: %s\n" % (since or "none; showing everything"))
+    elif since and not DATETIME_RE.match(since.replace(" ", "T")):
+        die("--since must be a date (YYYY-MM-DD) or 'handoff'")
+    changed = lambda n: str(n.meta.get("dateModified") or "")[:16].replace("T", " ") >= since
     groups = [
+        ("High priority, not done", [n for n in nodes if n.meta.get("priority") == "high" and n.status != "done"]),
         ("In progress", [n for n in nodes if n.status == "in-progress"]),
         ("Open", [n for n in nodes if n.status == "open"]),
         ("Questions nothing addresses or informs yet", [n for n in nodes if n.type == "question"
@@ -969,10 +1094,25 @@ def cmd_report(a):
         ("Claims at low confidence", [n for n in nodes if n.type == "claim" and n.meta.get("confidence") == "low"]),
         ("Not in any project", [n for n in nodes if n.stem not in members]),
     ]
+    if since:
+        groups.append(("Changed since %s" % since, sorted((n for n in nodes if changed(n)),
+                                                          key=lambda n: str(n.meta.get("dateModified")))))
+    if a.project:
+        groups = [g for g in groups if g[0] != "Not in any project"]
     for title, group in groups:
         print("## %s (%d)" % (title, len(group)))
         for n in group:
             print("- %s [%s]" % (describe(n), ", ".join(members.get(n.stem, [])) or "no project"))
+        print()
+    if since and a.since != "handoff":
+        entries = [e for e in entries if e["when"] >= since]
+    if since or entries:
+        shown = entries if since else entries[-5:]
+        print("## Notebook entries%s (%d%s)" % (" since " + since if since else ", latest", len(shown),
+                                                "" if since else " of %d" % len(entries)))
+        for e in shown:
+            first = e["text"].splitlines()[0] if e["text"] else ""
+            print("- %s%s: %s" % (e["when"], " — " + e["tag"] if e["tag"] else "", first[:100]))
         print()
 
 
@@ -991,7 +1131,7 @@ def all_errors(vault):
         uids[n.uid].append(n.stem)
     errors += ["nodeInstanceId %s is shared by %s" % (u, ", ".join(s)) for u, s in uids.items() if u and len(s) > 1]
     return (errors + relation_errors(vault) + cycle_errors(vault) + graph_errors(vault)
-            + frozen_errors(vault) + settings_errors(vault))
+            + frozen_errors(vault) + settings_errors(vault) + duplicate_paper_errors(vault))
 
 
 def cmd_check(a):
@@ -999,6 +1139,8 @@ def cmd_check(a):
     errors = all_errors(vault)
     for e in errors:
         print(e)
+    for w in notebook_warnings(vault):
+        print("warning: " + w)
     print("%d nodes, %d projects, %d relations, %d errors" % (
         len(vault.nodes), len(vault.projects), len(vault.relations), len(errors)))
     sys.exit(1 if errors else 0)
@@ -1041,6 +1183,7 @@ def cmd_compress(a):
         if errs:
             warn("%s has %d check errors; run `ygg --vault %s check`" % (src, len(errs), src))
         outline(project)
+        paper_matches(project, target)
     else:
         print("%s is not a ygg tree; recording it as a Source only.\n" % src)
     base = src if src.is_dir() else src.parent
@@ -1074,6 +1217,25 @@ def cmd_compress(a):
     print("\nNext: create the compressed Questions, Claims and Evidence with `ygg new`, deriving the "
           "Evidence from this Source (and its Dataset) with --link derived-from:..., then add the roots "
           "to the project note in ideas/.")
+
+
+def paper_matches(project, target):
+    """Print each paper Source of a project tree with the Source here for the same paper, if any, so the
+    compressed Evidence derives from that one instead of a duplicate."""
+    papers = sorted((n for n in project.nodes.values() if n.type == "source" and not n.meta.get("run")
+                     and not n.meta.get("tree")), key=lambda n: n.stem)
+    if not papers:
+        return
+    print("# Papers")
+    for n in papers:
+        same = sorted({o.stem for o in target.nodes.values() if paper_ids(o) & paper_ids(n)})
+        if same:
+            print("- [[%s]]: already here as %s; derive from it" % (n.stem, ", ".join("[[%s]]" % s for s in same)))
+        elif paper_ids(n):
+            print("- [[%s]]: new here; create it with the same zotero/doi" % n.stem)
+        else:
+            print("- [[%s]]: has no zotero or doi; look it up in Zotero before creating it here" % n.stem)
+    print()
 
 
 def new_source(vault, title, ref, body, supersedes):
@@ -1151,7 +1313,9 @@ def add_field_args(p):
     p.add_argument("--run-start", dest="run_start")
     p.add_argument("--run-end", dest="run_end")
     p.add_argument("--tree", help="repository@commit:path to a detailed project tree (sources)")
-    p.add_argument("--citekey", help="Zotero / BibTeX key (sources)")
+    p.add_argument("--zotero", help="Zotero item key of a paper, e.g. 2Q9B3YAH (sources)")
+    p.add_argument("--doi", help="DOI of a paper, e.g. 10.48550/arXiv.2410.14673 (sources)")
+    p.add_argument("--citekey", help="Better BibTeX citekey, for writing (sources)")
     p.add_argument("--add-data", dest="add_data", action="append", default=[], help="data location (sources)")
     p.add_argument("--add-figure", dest="add_figure", action="append", default=[],
                    help="repository@commit:path or absolute cluster path (sources)")
@@ -1216,7 +1380,17 @@ def main(argv=None):
     p.set_defaults(func=cmd_show)
 
     p = sub.add_parser("report", help="list work in progress, open nodes and loose ends")
+    p.add_argument("--project", help="only this project's notes")
+    p.add_argument("--since", help="YYYY-MM-DD, or 'handoff' for the last handoff entry in the notebook: also list "
+                   "the notes changed and the notebook entries since then")
     p.set_defaults(func=cmd_report)
+
+    p = sub.add_parser("log", help="append a dated entry to the tree's lab notebook, NOTEBOOK.md")
+    p.add_argument("text", nargs="?", help="the entry; or use --body")
+    p.add_argument("--tag", help="a word for the heading, e.g. decision, dead-end, run")
+    p.add_argument("--handoff", action="store_true", help="tag it handoff: where things stand, for the next session")
+    p.add_argument("--body", help="markdown file with the entry, or - for stdin")
+    p.set_defaults(func=cmd_log)
 
     p = sub.add_parser("sync", help="regenerate projects: fields and fill missing TaskNotes dates")
     p.set_defaults(func=cmd_sync)

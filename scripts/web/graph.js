@@ -78,23 +78,73 @@ export function downPath(s, from, to) {
   return path;
 }
 
+// Filters that show only some notes, each with the path up to its root for context.
+export const FILTERS = {
+  "in-progress": { label: "In progress", test: (n) => n.status === "in-progress" },
+  "not-done": { label: "Not done", test: (n) => n.status !== "done" },
+  gap: { label: "Gaps", test: (n) => n.flag === "gap" },
+  weak: { label: "Weak", test: (n) => ["low", "refuted"].includes(n.confidence) || ["failed", "ambiguous"].includes(n.outcome) },
+  changed: { label: "Changed since…", test: (n, f) => !f.since || String(n.meta.dateModified || "").slice(0, 10) >= f.since },
+  field: { label: "Field…", test: (n, f) => fieldMatches(n, f.key, f.value) },
+};
+
+// A frontmatter field matches if it holds the value (or any value, given none); case does not matter,
+// and a list matches if any item does. "type" and "status" are fields too.
+function fieldMatches(n, key, value) {
+  if (!key) return true;
+  const v = key === "type" ? n.type : n.meta[key];
+  if (v === undefined || v === null || v === "") return false;
+  const want = (value || "").trim().toLowerCase();
+  return !want || [].concat(v).some((x) => String(x).toLowerCase().includes(want));
+}
+
+// The frontmatter fields notes use, for the field filter's menu.
+export function fieldNames(G) {
+  const keys = new Set(["type"]);
+  for (const n of G.nodes) for (const k of Object.keys(n.meta)) keys.add(k);
+  return [...keys].sort();
+}
+
+// The notes in the structure matching filter f ({kind, since, key, value}), or null for no filter.
+export function filterMatches(G, s, f) {
+  if (!f || !FILTERS[f.kind]) return null;
+  return new Set([...s.inSet].filter((id) => FILTERS[f.kind].test(G.byId.get(id), f)));
+}
+
 // The view: shown nodes (with what folding each hides), the edges between them, and the tree to lay out.
 // With a focus, the view is the focus and what is under it, with the focus as its only root.
-export function computeView(G, s, unfolded, focus) {
+// With a filter ({matches, unfolded}), it is the matches and every note above them, and folding
+// is not used: a note's other children show only when it is in filter.unfolded.
+export function computeView(G, s, unfolded, focus, filter) {
   const scope = focus ? descendants(s, focus) : s.inSet;
-  const roots = focus ? [focus] : s.roots;
   const kids = (id) => s.children.get(id).filter((c) => scope.has(c));
+  let keep = null;
+  if (filter) {
+    keep = new Set();
+    const stack = [...filter.matches].filter((id) => scope.has(id));
+    while (stack.length) {
+      const id = stack.pop();
+      if (keep.has(id)) continue;
+      keep.add(id);
+      stack.push(...s.parents.get(id).filter((p) => scope.has(p)));
+    }
+  }
+  const isOpen = (id) => (filter ? filter.unfolded.has(id) : unfolded.has(id));
+  const showKids = (id) => (filter ? kids(id).filter((c) => keep.has(c) || filter.unfolded.has(id))
+                                   : unfolded.has(id) ? kids(id) : []);
+  const roots = focus ? [focus] : filter ? s.roots.filter((r) => keep.has(r)) : s.roots;
   const shown = new Set();
   const stack = [...roots].reverse();
   while (stack.length) {
     const id = stack.pop();
     if (shown.has(id)) continue;
     shown.add(id);
-    if (unfolded.has(id)) stack.push(...kids(id));
+    stack.push(...showKids(id).reverse());
   }
   const nodes = [...shown].map((id) => {
-    const folded = kids(id).length > 0 && !unfolded.has(id);
-    return { node: G.byId.get(id), folded, hidden: folded ? hiddenBelow(G, kids, shown, id) : { count: 0, gaps: 0 } };
+    const folded = !isOpen(id) && kids(id).some((c) => !shown.has(c));
+    return { node: G.byId.get(id), folded, match: !filter || filter.matches.has(id),
+             hidden: folded ? hiddenBelow(G, kids, shown, id) : { count: 0, gaps: 0 } };
   });
   const edges = [];
   for (const e of G.edges) {
@@ -104,7 +154,7 @@ export function computeView(G, s, unfolded, focus) {
     edges.push({ edge: e, from: p, to: c, cross: false, arrowAtEnd: e.target === c });
   }
   // each shown node's shown children, in a fixed order (by filename), for the layout
-  const shownKids = new Map([...shown].map((id) => [id, unfolded.has(id) ? kids(id).filter((c) => shown.has(c)) : []]));
+  const shownKids = new Map([...shown].map((id) => [id, showKids(id).filter((c) => shown.has(c))]));
   return { nodes, edges, roots, kids: shownKids };
 }
 

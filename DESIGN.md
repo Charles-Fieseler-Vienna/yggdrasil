@@ -55,7 +55,7 @@ All nodes live in `tree/`. `ideas/` holds only the higher-level project and pape
 | Question | `QUE - …` | An open question or hypothesis: "Is the head wave driven at the head?" |
 | Claim | `CLM - …` | An assertion supported by evidence. Includes claims about methods ("non-contrastive losses are sufficient for SSL alignment here"); there is no separate decision type. |
 | Evidence | `EVD - …` | What one run, run group or investigation showed: purpose, method, results, conclusion, caveats. |
-| Source | `@…` | A paper (`citekey`), a run or run group with an immutable reference (`run`), or a detailed project tree. |
+| Source | `@…` | A paper (`zotero`, `doi`; see [Papers](#papers)), a run or run group with an immutable reference (`run`), or a detailed project tree. |
 | Dataset | `DATA - …` | A dataset, or one version or subset of it, that results are established on. |
 
 The filename is the title (DG's format and TaskNotes' default `title.storage: filename`). A title states one idea: no semicolons, no sub-claims, no guesses at causes, no figure references. Details, qualifications and figure panels go in the body. Source keeps DG's default format, `@{content}`. Identity is `nodeInstanceId`, so renaming a note does not break its relations.
@@ -118,7 +118,8 @@ outcome: succeeded                      # Evidence
 | `outcome` | Evidence | `succeeded`, `failed`, `ambiguous`, `promising-out-of-scope`; required once `done` |
 | `run`, `run_start`, `run_end`, `data`, `figures` | Source | the run or run group |
 | `tree` | Source | `repository@commit:path` of a detailed project tree (written by `ygg compress`) |
-| `citekey` | Source | Zotero / BibTeX key, for papers |
+| `zotero`, `doi` | Source | a paper's Zotero item key (8 capital letters or digits) and DOI; at most one Source per paper |
+| `citekey` | Source | Better BibTeX citekey, for citing the paper in writing |
 | `location`, `n_animals`, `n_recordings` | Dataset | |
 | `legacy_ref` | all | where a backfilled note came from, e.g. `"TREE 1.12"` |
 
@@ -199,6 +200,17 @@ When a project, or a phase of one, is finished, its detailed tree is **compresse
 - A compressed Evidence note typically summarises an investigation that spanned many runs.
 - Compressed Evidence is `derived from` a Source pointing to the detailed tree at a fixed commit, so a new project that needs a detailed method can walk down into it, and from the Dataset it rests on.
 - The project's `roots` list the compressed root nodes.
+- Papers are not copied twice. `ygg compress` lists each paper Source of the project tree with the Source here for the same paper (by Zotero key or DOI), if any; compressed Evidence derives from that one. A paper with neither is flagged, to be looked up in Zotero first.
+
+## Papers
+
+Zotero is the one home of the literature. A paper is a Source titled with the paper's title, whose frontmatter holds its Zotero item key (`zotero`, e.g. `2Q9B3YAH`) and, where it has one, its DOI (`doi`, bare, e.g. `10.48550/arXiv.2410.14673`). Its body is at most a line on what the paper is: the bibliographic details, abstract and reading notes stay in Zotero. The web app links each paper to Zotero (`zotero://select/library/items/KEY`) and to its DOI.
+
+What a paper means for a project goes in Evidence derived from it ("Contrastive learning recovers latent dynamics under a nonlinear observation model"), which then informs questions or supports claims. The Source stays a pointer that any project can share, and the Evidence can be weak, strong or superseded like any other.
+
+Within one tree, a paper has one Source: `ygg new` refuses a second Source with the same Zotero key or DOI (compared without case or a `https://doi.org/` prefix), and `check` reports any that slip through, unless one supersedes the other. `zotero:KEY` and `doi:DOI` work wherever a note is named, e.g. `--link derived-from:zotero:2Q9B3YAH`. Separate project trees each make their own Sources; the duplicates are resolved on compression (see [Compression](#compression)).
+
+A paper Source is usually created `--status done`, since there is no work left on it.
 
 ## Evidence references
 
@@ -216,6 +228,22 @@ A project keeps its detailed tree in its own repository, e.g. `Cosyne_2027/resea
 
 When a project or phase is finished, `ygg compress PATH` (run in this repository) prints the project tree's outline and records it here as a Source at its current commit. The compressed nodes are then written by hand with the user (see [Compression](#compression)).
 
+## Notebook
+
+A project tree has a lab notebook, `NOTEBOOK.md` at its root (made by `ygg init`). It is the raw record under the tree: what was tried, decided, abandoned or guessed, as it happens, before it is settled enough to be a node. Three layers, each a cleaned-up version of the one below:
+
+| Layer | Where | Holds | Written |
+|---|---|---|---|
+| Notebook | project repository | everything, dated, unedited | as the work happens, by the user and by Claude |
+| Project tree | project repository | the graph of settled results, open questions and runs | when something settles |
+| yggdrasil | this repository | the compressed, generalizable part | at the end of a phase |
+
+Each entry is a `## YYYY-MM-DD HH:MM` heading, optionally `— tag` (`decision`, `dead-end`, `run`, `idea`, `handoff`), and free Markdown that links nodes as `[[...]]`. Entries are appended, newest last, and never edited or reordered; a correction is a new entry. `ygg log` appends one; `ygg check` warns, without failing, about links to notes that do not exist. ygg never rewrites the notebook.
+
+There is no separate decision log. A decision is first an entry; once it holds, it becomes a Claim (about a method, if it is one) with its Evidence, which may cite the entry's date.
+
+A **handoff** is an entry tagged `handoff`: where things stand, what is running (job IDs, output paths), the next steps as links to nodes, and loose state only the session knows (uncommitted code, scratch paths). Before writing one, the notebook since the last handoff is distilled into the tree: runs, results, decisions and dead ends become nodes, and the next one to three notes get `priority: high`. To catch up, `ygg report --since handoff` lists the high-priority and in-progress notes, the notes changed and the notebook entries since the last handoff. The `ygg-handoff` skill does both. yggdrasil itself, being compressed, has no notebook.
+
 ## Tooling
 
 `scripts/ygg` is the only writer of notes and `relations.json` besides the plugins' own UIs. It finds its tree by looking for `ygg.json` from the current directory up, or takes `--vault PATH`. Put it on your PATH with `ln -s "$PWD/scripts/ygg" ~/.local/bin/ygg`.
@@ -230,7 +258,8 @@ It is a [uv](https://docs.astral.sh/uv/) script: its first lines declare Python 
 | `ygg set NOTE [...]` | Changes fields or the body of an editable node, or a project's roots. |
 | `ygg done NOTE [--outcome X]` | Finishes and freezes a node. |
 | `ygg show NOTE` | Prints a note with its relations (and a claim's datasets), or a project with its members. |
-| `ygg report` | Lists work in progress, open nodes, unanswered questions, low-confidence claims and orphans. |
+| `ygg report [--project P] [--since DATE\|handoff]` | Lists high-priority and in-progress work, open nodes, unanswered questions, low-confidence claims and orphans; with `--since`, also the notes changed and the notebook entries since then. |
+| `ygg log [TEXT] [--tag WORD] [--handoff] [--body FILE]` | Appends a dated entry to the notebook (see [Notebook](#notebook)). |
 | `ygg sync` | Regenerates `projects:` and fills in TaskNotes dates missing from notes made in Obsidian. |
 | `ygg compress PATH [--dry-run]` | Outlines a project tree and records it as a Source at its commit; refuses uncommitted trees. |
 | `ygg serve [--port N] [--open]` | Serves a local web app for browsing and editing the tree (see [Web app](#web-app)). |
@@ -267,9 +296,11 @@ The layout is a tidy tree, one column per level, with each node's children in a 
 
 Alt-click a node (or **Focus** in the side panel) to make it the view's only root: the view shows just it and what is under it, unfolded one level. A breadcrumb above the graph shows the trail of notes focused from the top, with **↑ Up** (focus on the note above), **Reset** (the whole tree, folded to the default) and links to each note on the trail. Alt-clicking a note under the focus extends the trail; anything else starts a new one from its shortest path to a top root.
 
+The **Show** menu filters the notes themselves: **In progress**, **Not done**, **Gaps**, **Weak** (low or refuted confidence, a failed or ambiguous outcome), **Changed since…** a date, or **Field…**, any frontmatter field holding a value (or any value). The matches are shown with every note above them up to the roots, faded, for context, and nothing else; folding is set aside, and ctrl-click shows or hides a note's other children. With nothing selected, the side panel lists the matches, most recently changed first. This is the catch-up view for a project: pick the project, then In progress or Not done.
+
 Fold state, focus trail, filters and the project choice are kept in the browser per vault. The toolbar filters by project and type, finds a note (unfolding a path down to it), and folds to the default or unfolds everything.
 
-Selecting a node shows its fields, its relations and its body, with a link to open it in Obsidian. From there:
+Selecting a node shows its fields, its relations and its body, with a link to open it in Obsidian (and, for a paper, in Zotero and at its DOI). From there:
 
 - **Connect to…**, then click another node: offers only the relations allowed between the two types, either way round, and not already present;
 - **New note here**: a node of any type that can relate to the selected one, created with its relation in one step (so never an orphan). The title is a short name that is also the filename (so no `?` or `:`); the body has one optional box per section of the type, each with a hint of what goes there;

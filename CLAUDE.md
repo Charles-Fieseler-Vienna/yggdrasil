@@ -43,11 +43,13 @@ ygg new claim "Head bending is continuously driven" --body clm.md \
 ```bash
 ygg compress ~/Current_work/repos/Cosyne_2027/research/tree      # prints the outline, records the Source
 ```
-Then write the compressed nodes with `ygg new`: about one Question per figure, one Claim per one to three panels, each Claim with its own Evidence derived from the tree Source and the Dataset. Keep generalizable results, dead ends and open questions; leave narrow methods details in the project tree. Add the root nodes with `ygg set PROJECT --add-root NOTE`.
+Then write the compressed nodes with `ygg new`: about one Question per figure, one Claim per one to three panels, each Claim with its own Evidence derived from the tree Source and the Dataset. Keep generalizable results, dead ends and open questions; leave narrow methods details in the project tree. Add the root nodes with `ygg set PROJECT --add-root NOTE`. The outline's **Papers** list says which of the project's papers already have a Source here (derive from that one; never make a second) and which lack a Zotero key or DOI.
 
 **The web app.** `ygg serve` serves a local web app (port 8765) for browsing and editing the tree; its edits run the same CLI commands. It never returns, so don't run it in the foreground yourself; make changes with the CLI, which the open page picks up at once. It is a FastAPI server (`scripts/ygg_server.py`) and a React Flow page (`scripts/web/`); `scripts/ygg` is a uv script, but every other command also runs on plain `python3`.
 
 **Changing a conclusion.** Never edit a `done` node. Create a new node of the same type with `--link supersedes:OLD`, saying what changed and why, then update the project's Findings.
+
+**The notebook.** A project tree has a lab notebook, `NOTEBOOK.md`, the raw record under the tree. While working in a project, append decisions, dead ends and surprises as they happen with `ygg log "..." --tag decision` (or `dead-end`, `run`, `idea`); never edit past entries. At the end of a session, or when the user asks where things stand, use the `ygg-handoff` skill: it distils the notebook into nodes and appends a `handoff` entry, or reads the last one with `ygg report --since handoff`.
 
 **Finishing up.**
 ```bash
@@ -65,5 +67,5 @@ Commit only when the user asks, or when they have asked you to maintain the repo
 - **Failed and ambiguous results are worth recording.** Say what would make them worth retrying.
 - **Findings on project notes** are short claims citing Claim nodes, e.g. `- The head wave is driven at the head ([[CLM - Head bending is continuously driven]]).`
 - **Use the user's words** for concepts that already have names in their project documents. Don't invent new terminology.
-- **Cite papers** as Sources with `--citekey <key>`. The user's Zotero library is available through the Zotero tools if a key needs to be looked up.
+- **Papers** are Sources titled with the paper's title, with `--zotero KEY` (the Zotero item key) and `--doi`, created `--status done`; what a paper means for the project goes in Evidence derived from it. Look keys up with the Zotero tools, never guess them. Name a paper as `zotero:KEY` or `doi:DOI` anywhere a note is named. The `ygg-paper` skill has the steps, and `ygg-brainstorm` the interview for new questions and projects.
 - **Backfilling** old results: pass `--created` with the original date and `--legacy-ref` with where it came from (e.g. `"TREE 1.12"`).

@@ -33,13 +33,17 @@ def tree_version(root):
     return "%d-%d" % (len(stamps), max(stamps or [0]))
 
 
+HIDDEN_META = {"nodeTypeId", "nodeInstanceId", "projects"}  # sent as type, id and projects
+
+
 def graph_json(ygg, vault):
     flags = ygg.node_flags(vault)
     nodes = [{"id": n.uid, "stem": n.stem, "title": n.content, "type": n.type, "status": n.status,
               "confidence": n.meta.get("confidence"), "outcome": n.meta.get("outcome"),
               "flag": flags.get(n.stem),
               "projects": [ygg.unlink_name(p) for p in n.meta.get("projects") or []],
-              "file": n.path.relative_to(vault.root).as_posix()}
+              "file": n.path.relative_to(vault.root).as_posix(),
+              "meta": {k: v for k, v in n.meta.items() if k not in HIDDEN_META}}
              for n in vault.nodes.values() if n.uid and n.type]
     edges = [{"id": rid, "rel": rel, "source": s.uid, "target": d.uid}
              for rid, rel, s, d in vault.edges(with_ids=True)]
@@ -64,6 +68,8 @@ class NewNode(BaseModel):
     direction: str = "out"            # out: new REL other; in: other REL new
     project: Optional[str] = None     # make it a root of this project instead
     confidence: Optional[str] = None
+    zotero: Optional[str] = None      # a paper Source's Zotero item key and DOI
+    doi: Optional[str] = None
     sections: Dict[str, str] = {}     # body text by section heading; the type's other sections stay empty
 
 
@@ -169,6 +175,9 @@ def create_app(ygg, root, token):
             raise HTTPException(400, "a new note needs a relation to another note, or a project to be a root of")
         if q.confidence and q.type in ygg.CONFIDENCE:
             argv += ["--confidence", q.confidence]
+        for k in ("zotero", "doi"):
+            if getattr(q, k) and getattr(q, k).strip() and q.type == "source":
+                argv += ["--" + k, getattr(q, k).strip()]
         tree.run(*argv, body=tree.body(q.type, q.sections))
         prefix = ygg.TYPES[q.type]["prefix"]
         stem = prefix + (q.title[len(prefix):] if q.title.startswith(prefix) else q.title).strip()

@@ -112,6 +112,7 @@ export function NewNoteDialog({ G, here, onClose, onDone }) {
   const [choice, setChoice] = useState(0);
   const [confidence, setConfidence] = useState("low");
   const [sections, setSections] = useState({});
+  const [paper, setPaper] = useState({ zotero: "", doi: "" });
   const spec = G.schema.types[type];
   const newName = "the new " + spec.name.toLowerCase();
   const rels = validRelations(G.schema, type, H.type).map((x) => ({
@@ -123,7 +124,7 @@ export function NewNoteDialog({ G, here, onClose, onDone }) {
               check=${() => titleProblem(title)} onSubmit=${async () => {
       const x = rels[choice];
       const r = await api.createNote({ type, title: title.trim(), rel: x.rel, other: H.id, direction: x.dir,
-                                       confidence: levels ? confidence : null, sections });
+                                       confidence: levels ? confidence : null, sections, ...paper });
       await onDone({ created: r.id, unfold: H.id });
     }}>
       <${Field} label="Type">
@@ -140,6 +141,13 @@ export function NewNoteDialog({ G, here, onClose, onDone }) {
           <select value=${confidence} onChange=${(e) => setConfidence(e.target.value)}>
             ${levels.map((v) => html`<option key=${v} value=${v}>${v}</option>`)}
           </select>
+        </${Field}>` : null}
+      ${type === "source" ? html`
+        <${Field} label="For a paper: Zotero item key (e.g. 2Q9B3YAH) and/or DOI">
+          <span className="paper-ids">
+            <input type="text" placeholder="Zotero key" value=${paper.zotero} onChange=${(e) => setPaper({ ...paper, zotero: e.target.value })} />
+            <input type="text" placeholder="DOI" value=${paper.doi} onChange=${(e) => setPaper({ ...paper, doi: e.target.value })} />
+          </span>
         </${Field}>` : null}
       <${Sections} names=${spec.sections} values=${sections} onChange=${setSections} />
     </${Modal}>`;

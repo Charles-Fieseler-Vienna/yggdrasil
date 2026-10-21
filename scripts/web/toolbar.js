@@ -1,9 +1,35 @@
 // The toolbar (filters, search, fold controls) and the breadcrumb shown while focused on a note.
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { FILTERS, fieldNames } from "./graph.js";
 import { html } from "./html.js";
 
-export function Toolbar({ G, project, setProject, hiddenTypes, toggleType, onFind, onFoldDefault, onUnfoldAll,
-                          onFit, onNewRoot }) {
+// "Show only": a note filter, with a date for "changed since" or a field and value for "field".
+function NoteFilter({ G, filter, setFilter, count }) {
+  const f = filter || { kind: "" };
+  const fields = useMemo(() => fieldNames(G), [G]);
+  const set = (change) => setFilter({ ...f, ...change });
+  const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+  return html`
+    <span className=${"note-filter" + (f.kind ? " on" : "")}>
+      <select value=${f.kind} title="Show only these notes, with the notes above them for context"
+              onChange=${(e) => setFilter(e.target.value ? { kind: e.target.value, since: f.since || weekAgo,
+                                                              key: f.key || "status", value: f.value || "" } : null)}>
+        <option value="">Show everything</option>
+        ${Object.entries(FILTERS).map(([k, x]) => html`<option key=${k} value=${k}>${x.label}</option>`)}
+      </select>
+      ${f.kind === "changed" ? html`
+        <input type="date" value=${f.since} onChange=${(e) => set({ since: e.target.value })} />` : null}
+      ${f.kind === "field" ? html`
+        <select value=${f.key} onChange=${(e) => set({ key: e.target.value })}>
+          ${fields.map((k) => html`<option key=${k} value=${k}>${k}</option>`)}
+        </select>
+        <input type="text" placeholder="contains… (any)" value=${f.value} onChange=${(e) => set({ value: e.target.value })} />` : null}
+      ${f.kind ? html`<span className="count muted">${count} ${count === 1 ? "match" : "matches"}</span>` : null}
+    </span>`;
+}
+
+export function Toolbar({ G, project, setProject, hiddenTypes, toggleType, filter, setFilter, matchCount, onFind,
+                          onFoldDefault, onUnfoldAll, onFit, onNewRoot }) {
   const [query, setQuery] = useState("");
   const find = (value) => {
     if (onFind(value.trim())) setQuery("");
@@ -22,6 +48,7 @@ export function Toolbar({ G, project, setProject, hiddenTypes, toggleType, onFin
             <span className="type-chip" style=${{ background: spec.color }}>${spec.name}</span>
           </label>`)}
       </span>
+      <${NoteFilter} G=${G} filter=${filter} setFilter=${setFilter} count=${matchCount} />
       <input className="search" list="search-list" placeholder="Find a note…" value=${query}
              onChange=${(e) => {
                setQuery(e.target.value);
