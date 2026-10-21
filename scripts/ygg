@@ -1,0 +1,1196 @@
+#!/usr/bin/env python3
+"""ygg: create, link, finish, check and compress discourse-graph research trees.
+
+A tree is an Obsidian vault (marked by ygg.json) whose nodes live in tree/, whose
+project notes live in ideas/, and whose relations live in relations.json, in the
+formats of the Discourse Graph and TaskNotes plugins. See DESIGN.md.
+Run `ygg <command> -h` for details. Standard library only.
+"""
+import argparse
+import datetime
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from collections import defaultdict
+from pathlib import Path
+
+SPEC_VERSION = 1
+
+# --- Schema --------------------------------------------------------------------
+
+TYPES = {
+    "question": dict(name="Question", prefix="QUE - ", color="#99890e",
+                     sections=["Question", "Context"], required=["Question"],
+                     description="An open question or hypothesis."),
+    "claim": dict(name="Claim", prefix="CLM - ", color="#7DA13E",
+                  sections=["Claim", "Rationale", "Scope"], required=["Claim"],
+                  description="An assertion supported by evidence, including claims about methods."),
+    "evidence": dict(name="Evidence", prefix="EVD - ", color="#DB134A",
+                     sections=["Purpose", "Method", "Results", "Conclusion", "Caveats"],
+                     required=["Conclusion", "Caveats"],
+                     description="What a run, run group or investigation showed, with its caveats."),
+    "source": dict(name="Source", prefix="@", color="#9E9E9E",
+                   sections=["Description"], required=[],
+                   description="A paper, a run or run group, or a detailed project tree."),
+    "dataset": dict(name="Dataset", prefix="DATA - ", color="#3B6FB6",
+                    sections=["Description", "Provenance"], required=[],
+                    description="A dataset, version or subset that results are established on."),
+}
+NODE_TYPES = list(TYPES)
+TYPE_ID = {t: "node_ygg_" + t for t in TYPES}
+TYPE_BY_ID = {v: k for k, v in TYPE_ID.items()}
+
+WORK = ["question", "claim", "evidence"]
+# cli name -> (label, complement, color, allowed (source type, destination type) pairs)
+RELATIONS = {
+    "supports": ("supports", "is supported by", "green", [("evidence", "claim")]),
+    "opposes": ("opposes", "is opposed by", "red", [("evidence", "claim")]),
+    "informs": ("informs", "is informed by", "grey", [("evidence", "question")]),
+    "derived-from": ("derived from", "has derivation", "blue",
+                     [("evidence", "source"), ("evidence", "dataset"), ("source", "source"),
+                      ("source", "dataset"), ("dataset", "dataset")]),
+    "addresses": ("addresses", "is addressed by", "light-green", [("claim", "question")]),
+    "follows-from": ("follows from", "leads to", "violet",
+                     [("question", "question"), ("question", "claim"), ("claim", "claim")]),
+    "supersedes": ("supersedes", "is superseded by", "orange", [(t, t) for t in TYPES]),
+    "blocked-by": ("blocked by", "blocks", "light-red", [(a, b) for a in WORK for b in WORK]),
+}
+REL_ID = {r: "relation_ygg_" + r for r in RELATIONS}
+REL_BY_ID = {v: k for k, v in REL_ID.items()}
+ACYCLIC = {"derived-from", "follows-from", "supersedes"}
+
+STATUSES = ["open", "in-progress", "done"]
+PRIORITIES = ["none", "low", "normal", "high"]
+CONFIDENCE = {"claim": ["low", "medium", "high", "refuted"], "evidence": ["low", "medium", "high"]}
+OUTCOMES = ["succeeded", "failed", "ambiguous", "promising-out-of-scope"]
+TYPE_FIELDS = {
+    "question": set(),
+    "claim": {"confidence"},
+    "evidence": {"confidence", "outcome"},
+    "source": {"run", "run_start", "run_end", "tree", "data", "figures", "citekey"},
+    "dataset": {"location", "n_animals", "n_recordings"},
+}
+OWN_FIELDS = set().union(*TYPE_FIELDS.values())
+LIST_FIELDS = {"data", "figures", "projects"}
+# Fields that may change on a done note: generated, or bumped by the plugins.
+UNFROZEN_FIELDS = {"projects", "dateModified"}
+
+DG_PLUGIN = "discourse-graphs"
+TN_PLUGIN = "tasknotes"
+T0 = 1792540800000  # 2026-10-21, creation time stamped on the schema entries
+
+REF_RE = re.compile(r"^[\w.-]+@[0-9a-f]{7,40}:\S+$")
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$")
+UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+BAD_NAME_RE = re.compile(r'[\\/:*?"<>|#^\[\]]')
+WIKILINK_RE = re.compile(r"\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]")
+CODE_BLOCK_RE = re.compile(r"```.*?```", re.S)
+COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+KEY_RE = re.compile(r"^([A-Za-z_][\w-]*):(?:[ \t]+(.*))?$")
+ITEM_RE = re.compile(r"^\s*- (.*)$")
+PLAIN_RE = re.compile(r"^[A-Za-z0-9_./][A-Za-z0-9_ ./@:+()-]*$")
+INT_RE = re.compile(r"^-?\d+$")
+YAML_AMBIGUOUS_RE = re.compile(r"^([-+]?[\d.]+([eE][-+]?\d+)?|true|false|yes|no|on|off|null|~)$", re.I)
+
+
+class NoteError(Exception):
+    pass
+
+
+def die(msg):
+    sys.exit("error: " + msg)
+
+
+def warn(msg):
+    print("warning: " + msg, file=sys.stderr)
+
+
+def now():
+    return datetime.datetime.now().astimezone().replace(microsecond=0).isoformat()
+
+
+def today():
+    return datetime.date.today().isoformat()
+
+
+def uuid7():
+    b = bytearray(int(time.time() * 1000).to_bytes(6, "big") + os.urandom(10))
+    b[6] = 0x70 | (b[6] & 0x0F)
+    b[8] = 0x80 | (b[8] & 0x3F)
+    h = b.hex()
+    return "%s-%s-%s-%s-%s" % (h[:8], h[8:12], h[12:16], h[16:20], h[20:])
+
+
+def slugify(title):
+    s = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    return s[:60].rsplit("-", 1)[0] if len(s) > 60 else s
+
+
+def wikilink(stem):
+    return "[[%s]]" % stem
+
+
+def unlink_name(v):
+    m = WIKILINK_RE.fullmatch(str(v).strip())
+    return m.group(1).strip() if m else str(v).strip()
+
+
+# --- Frontmatter -----------------------------------------------------------------
+# A small YAML subset: scalars and lists of scalars. Anything else (nested maps,
+# lists of objects, block scalars) is kept as raw lines and written back unchanged,
+# as the TaskNotes spec requires for unknown fields.
+
+RAW = object()
+
+
+def parse_scalar(v):
+    v = v.strip()
+    if v.startswith('"'):
+        return json.loads(v)
+    if v.startswith("'") and v.endswith("'") and len(v) > 1:
+        return v[1:-1].replace("''", "'")
+    if INT_RE.match(v):
+        return int(v)
+    if v in ("true", "false"):
+        return v == "true"
+    if v in ("null", "~"):
+        return None
+    return v
+
+
+def format_scalar(v):
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, int):
+        return str(v)
+    v = str(v)
+    if PLAIN_RE.match(v) and not YAML_AMBIGUOUS_RE.match(v) and ": " not in v and not v.endswith(":"):
+        return v
+    return json.dumps(v, ensure_ascii=False)
+
+
+def parse_frontmatter(text):
+    """Return ({key: value}, {key: raw lines}, body). RAW values are opaque."""
+    if not text.startswith("---\n"):
+        raise NoteError("missing frontmatter")
+    end = text.find("\n---", 3)
+    if end < 0 or text[end + 4:end + 5] not in ("\n", ""):
+        raise NoteError("unterminated frontmatter")
+    lines = text[4:end].split("\n") if end > 3 else []
+    meta, raw, i = {}, {}, 0
+    while i < len(lines):
+        line = lines[i]
+        if not line.strip():
+            i += 1
+            continue
+        m = KEY_RE.match(line)
+        if not m:
+            raise NoteError("unparseable frontmatter line: " + line)
+        key, rest = m.group(1), (m.group(2) or "").strip()
+        j = i + 1
+        while j < len(lines) and lines[j].strip() and (lines[j][0] in " \t" or lines[j].startswith("- ")):
+            j += 1
+        block, cont = lines[i:j], lines[i + 1:j]
+        raw[key] = block
+        if cont:
+            items = [ITEM_RE.match(c) for c in cont]
+            simple = rest == "" and all(it and not KEY_RE.match(it.group(1)) and
+                                        not it.group(1).startswith(("{", "[", "|", ">")) for it in items)
+            meta[key] = [parse_scalar(it.group(1)) for it in items] if simple else RAW
+        elif rest == "[]":
+            meta[key] = []
+        elif rest.startswith("[") and rest.endswith("]") and "[" not in rest[1:-1] and "{" not in rest:
+            meta[key] = [parse_scalar(x) for x in rest[1:-1].split(",") if x.strip()]
+        elif rest.startswith(("{", "[", "|", ">", "&", "*", "!")):
+            meta[key] = RAW
+        else:
+            meta[key] = parse_scalar(rest) if rest else None
+        i = j
+    body = text[end + 4:]
+    return meta, raw, body[1:] if body.startswith("\n") else body
+
+
+def render_frontmatter(meta, raw, dirty):
+    out = ["---"]
+    for k, v in meta.items():
+        if k not in dirty and k in raw:
+            out += raw[k]
+        elif v is RAW:
+            out += raw[k]
+        elif v is None or v == "":
+            continue
+        elif isinstance(v, list):
+            out += [k + ": []"] if not v else [k + ":"] + ["  - " + format_scalar(x) for x in v]
+        else:
+            out.append(k + ": " + format_scalar(v))
+    out.append("---")
+    return "\n".join(out) + "\n"
+
+
+def section_text(body, heading):
+    """Text under `## heading`, without HTML comments; None if the heading is missing."""
+    m = re.search(r"^## %s[ \t]*$" % re.escape(heading), body, re.M)
+    if not m:
+        return None
+    rest = body[m.end():]
+    nxt = re.search(r"^## ", rest, re.M)
+    return COMMENT_RE.sub("", rest[:nxt.start()] if nxt else rest).strip()
+
+
+def inline_links(body):
+    return [t.strip() for t in WIKILINK_RE.findall(COMMENT_RE.sub("", CODE_BLOCK_RE.sub("", body)))]
+
+
+class Note:
+    def __init__(self, path, meta, raw, body):
+        self.path, self.meta, self.raw, self.body = path, meta, raw, body
+        self.dirty = set()
+
+    stem = property(lambda self: self.path.stem)
+    status = property(lambda self: self.meta.get("status"))
+    uid = property(lambda self: self.meta.get("nodeInstanceId"))
+
+    @property
+    def type(self):
+        if self.path.parent.name == "ideas":
+            return "project" if self.meta.get("type") == "project" else None
+        return TYPE_BY_ID.get(self.meta.get("nodeTypeId"))
+
+    @property
+    def content(self):
+        t = self.type
+        p = TYPES[t]["prefix"] if t in TYPES else ""
+        return self.stem[len(p):] if p and self.stem.startswith(p) else self.stem
+
+    @classmethod
+    def load(cls, path):
+        meta, raw, body = parse_frontmatter(path.read_text(encoding="utf-8"))
+        return cls(path, meta, raw, body)
+
+    def set(self, key, value):
+        if self.meta.get(key) != value or key not in self.meta:
+            self.meta[key] = value
+            self.dirty.add(key)
+
+    def render(self):
+        return render_frontmatter(self.meta, self.raw, self.dirty) + "\n" + self.body.strip() + "\n"
+
+    def save(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(self.render(), encoding="utf-8")
+
+
+# --- Vault -------------------------------------------------------------------------
+
+def find_vault(start):
+    p = Path(start).resolve()
+    for d in [p] + list(p.parents):
+        if (d / "ygg.json").exists():
+            return d
+    die("no ygg.json in %s or its parents; run `ygg init` or pass --vault" % p)
+
+
+class Vault:
+    def __init__(self, root):
+        self.root = Path(root).resolve()
+        self.errors = []
+        self.nodes, self.projects = {}, {}
+        for folder, store in (("tree", self.nodes), ("ideas", self.projects)):
+            d = self.root / folder
+            for p in sorted(d.iterdir()) if d.is_dir() else []:
+                if p.name.startswith("."):
+                    continue
+                if p.suffix != ".md":
+                    self.errors.append("%s: only .md notes belong here; the repository is text only" % self.rel(p))
+                    continue
+                try:
+                    store[p.stem] = Note.load(p)
+                except (NoteError, ValueError) as e:
+                    self.errors.append("%s: %s" % (self.rel(p), e))
+        self.relations = self.load_relations()
+
+    def rel(self, p):
+        return os.path.relpath(str(p), os.getcwd())
+
+    @property
+    def relations_path(self):
+        return self.root / "relations.json"
+
+    def load_relations(self):
+        if not self.relations_path.exists():
+            return {}
+        try:
+            return json.loads(self.relations_path.read_text(encoding="utf-8")).get("relations", {})
+        except ValueError as e:
+            self.errors.append("relations.json: %s" % e)
+            return {}
+
+    def save_relations(self):
+        try:
+            data = json.loads(self.relations_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {"version": 1}
+        data["lastModified"] = int(time.time() * 1000)
+        data["relations"] = self.relations
+        self.relations_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+    def by_uid(self):
+        return {n.uid: n for n in self.nodes.values() if n.uid}
+
+    def edges(self):
+        """(relation, source note, destination note) for every resolvable relation."""
+        uid = self.by_uid()
+        out = []
+        for r in self.relations.values():
+            rel, s, d = REL_BY_ID.get(r.get("type")), uid.get(r.get("source")), uid.get(r.get("destination"))
+            if rel and s and d and r.get("tentative") is not False:
+                out.append((rel, s, d))
+        return out
+
+    def resolve(self, name, kinds=("node",)):
+        pools = []
+        if "node" in kinds:
+            pools.append(self.nodes)
+        if "project" in kinds:
+            pools.append(self.projects)
+        name = unlink_name(name)
+        for pool in pools:
+            if name in pool:
+                return pool[name]
+        for pool in pools:
+            for n in pool.values():
+                if n.uid == name or (pool is self.nodes and n.content == name):
+                    return n
+        hits = [n for pool in pools for n in pool.values() if name.lower() in n.stem.lower()]
+        if len(hits) == 1:
+            return hits[0]
+        if not hits:
+            die("no note matches %r" % name)
+        die("%r matches several notes:\n  " % name + "\n  ".join(sorted(n.stem for n in hits)))
+
+    # --- Project membership ---
+
+    def membership(self):
+        """Map node stem -> sorted project stems, walking down from each project's roots."""
+        edges = self.edges()
+        result = defaultdict(set)
+        for pstem, p in self.projects.items():
+            members = set()
+            for r in p.meta.get("roots") or []:
+                n = self.nodes.get(unlink_name(r))
+                if n:
+                    members.add(n.stem)
+            changed = True
+            while changed:
+                changed = False
+                for rel, s, d in edges:
+                    if rel in ("follows-from", "addresses", "informs", "supports", "opposes", "supersedes"):
+                        new = s.stem if d.stem in members else None
+                    elif rel == "derived-from":
+                        new = d.stem if s.stem in members else None
+                    else:
+                        new = None
+                    if new and new not in members:
+                        members.add(new)
+                        changed = True
+            for m in members:
+                result[m].add(pstem)
+        return {k: sorted(v) for k, v in result.items()}
+
+    def sync(self, quiet=False):
+        """Write the generated projects: field and fill missing TaskNotes dates. Returns changed notes."""
+        members = self.membership()
+        changed = []
+        for n in self.nodes.values():
+            before = set(n.dirty)
+            want = [wikilink(p) for p in members.get(n.stem, [])]
+            if want:
+                n.set("projects", want)
+            elif "projects" in n.meta:
+                n.set("projects", None)
+            if not n.meta.get("dateCreated"):
+                n.set("dateCreated", datetime.datetime.fromtimestamp(n.path.stat().st_mtime).astimezone()
+                      .replace(microsecond=0).isoformat())
+            if not n.meta.get("dateModified"):
+                n.set("dateModified", n.meta["dateCreated"])
+            if n.status == "done" and not n.meta.get("completedDate"):
+                n.set("completedDate", str(n.meta["dateModified"])[:10])
+            if n.dirty != before:
+                n.save()
+                changed.append(n)
+                if not quiet:
+                    print("synced " + self.rel(n.path))
+        return changed
+
+    def scope(self, claim):
+        """Datasets a claim rests on, through supporting evidence and derived-from chains."""
+        edges = self.edges()
+        frontier = [s for rel, s, d in edges if rel == "supports" and d is claim]
+        seen, datasets = set(), set()
+        while frontier:
+            n = frontier.pop()
+            if n.stem in seen:
+                continue
+            seen.add(n.stem)
+            if n.type == "dataset":
+                datasets.add(n.stem)
+            frontier += [d for rel, s, d in edges if rel == "derived-from" and s is n]
+        return sorted(datasets)
+
+
+# --- Validation ----------------------------------------------------------------
+
+def validate_node(n, vault):
+    errs, m, t = [], n.meta, n.type
+    if t is None:
+        return ["nodeTypeId %r is not a ygg node type" % m.get("nodeTypeId")]
+    if not n.stem.startswith(TYPES[t]["prefix"]) or not n.content.strip():
+        errs.append("a %s's filename must start with %r" % (t, TYPES[t]["prefix"]))
+    if not UUID_RE.match(str(m.get("nodeInstanceId", ""))):
+        errs.append("nodeInstanceId must be a uuid")
+    if "title" in m and m["title"] != n.stem:
+        errs.append("title %r differs from the filename, which is the title" % m["title"])
+    if n.status not in STATUSES:
+        errs.append("status %r is not one of %s" % (n.status, STATUSES))
+    if "priority" in m and m["priority"] not in PRIORITIES:
+        errs.append("priority %r is not one of %s" % (m["priority"], PRIORITIES))
+    for k in ("dateCreated", "dateModified"):
+        if not DATETIME_RE.match(str(m.get(k) or "")):
+            errs.append("%s is missing or not ISO 8601 (`ygg sync` fills it in)" % k)
+    for k in ("scheduled", "completedDate"):
+        if k in m and m[k] and not DATETIME_RE.match(str(m[k])):
+            errs.append("%s must be an ISO date" % k)
+    for k in sorted((OWN_FIELDS - TYPE_FIELDS[t]) & set(m)):
+        errs.append("field %r is not allowed on a %s" % (k, t))
+    for k in LIST_FIELDS & set(m):
+        if m[k] is not None and not isinstance(m[k], list):
+            errs.append("field %r must be a list" % k)
+    if t in CONFIDENCE and m.get("confidence") not in CONFIDENCE[t]:
+        errs.append("confidence %r is not one of %s" % (m.get("confidence"), CONFIDENCE[t]))
+    if m.get("outcome") and m["outcome"] not in OUTCOMES:
+        errs.append("outcome %r is not one of %s" % (m["outcome"], OUTCOMES))
+    for k in ("run", "tree"):
+        if m.get(k) and not REF_RE.match(str(m[k])):
+            errs.append("%s must be repository@commit:path, got %r" % (k, m[k]))
+    for k in ("run_start", "run_end"):
+        if m.get(k) and not DATETIME_RE.match(str(m[k])):
+            errs.append("%s must be an ISO date or datetime" % k)
+    for f in m.get("figures") or []:
+        if not (REF_RE.match(str(f)) or str(f).startswith("/")):
+            errs.append("figure %r must be repository@commit:path or an absolute cluster path" % f)
+    if n.status == "done":
+        if not m.get("completedDate"):
+            errs.append("a done note needs completedDate")
+        if t == "evidence" and not m.get("outcome"):
+            errs.append("done evidence needs an outcome")
+        for s in TYPES[t]["required"]:
+            if not section_text(n.body, s):
+                errs.append("a done %s needs a non-empty ## %s section" % (t, s))
+    names = set(vault.nodes) | set(vault.projects)
+    for target in inline_links(n.body):
+        if target not in names:
+            errs.append("inline link [[%s]] does not exist" % target)
+    return errs
+
+
+def validate_project(p, vault):
+    errs = []
+    if p.type != "project":
+        return ["notes in ideas/ must have type: project"]
+    if not p.meta.get("title"):
+        errs.append("missing title")
+    roots = p.meta.get("roots") or []
+    if not isinstance(roots, list):
+        return errs + ["roots must be a list of [[links]]"]
+    for r in roots:
+        if unlink_name(r) not in vault.nodes:
+            errs.append("root %s is not a node in tree/" % r)
+    names = set(vault.nodes) | set(vault.projects)
+    for target in inline_links(p.body):
+        if target not in names:
+            errs.append("inline link [[%s]] does not exist" % target)
+    return errs
+
+
+def relation_errors(vault):
+    errs, seen = [], set()
+    uid = vault.by_uid()
+    for rid, r in vault.relations.items():
+        rel = REL_BY_ID.get(r.get("type"))
+        s, d = uid.get(r.get("source")), uid.get(r.get("destination"))
+        where = "relations.json %s" % rid
+        if rel is None:
+            errs.append("%s: unknown relation type %r" % (where, r.get("type")))
+            continue
+        if s is None or d is None:
+            errs.append("%s: %s endpoint does not exist" % (where, "source" if s is None else "destination"))
+            continue
+        if (s.type, d.type) not in RELATIONS[rel][3]:
+            errs.append("%s: %s cannot go from a %s to a %s ([[%s]] -> [[%s]])" % (
+                where, rel, s.type, d.type, s.stem, d.stem))
+        if s is d:
+            errs.append("%s: [[%s]] relates to itself" % (where, s.stem))
+        if (rel, s.uid, d.uid) in seen:
+            errs.append("%s: duplicate %s [[%s]] -> [[%s]]" % (where, rel, s.stem, d.stem))
+        seen.add((rel, s.uid, d.uid))
+    return errs
+
+
+def cycle_errors(vault):
+    graph = defaultdict(list)
+    for rel, s, d in vault.edges():
+        if rel in ACYCLIC:
+            graph[s.stem].append(d.stem)
+    state, errs = {}, []
+
+    def visit(v, stack):
+        state[v] = 1
+        for w in graph[v]:
+            if state.get(w) == 1:
+                errs.append("cycle: " + " -> ".join(stack[stack.index(w):] + [w]))
+            elif w not in state:
+                visit(w, stack + [w])
+        state[v] = 2
+
+    for v in list(graph):
+        if v not in state:
+            visit(v, [v])
+    return errs
+
+
+def graph_errors(vault):
+    errs = []
+    supported = {d.stem for rel, s, d in vault.edges() if rel == "supports"}
+    members = vault.membership()
+    for n in vault.nodes.values():
+        if n.type == "claim" and n.stem not in supported:
+            errs.append("[[%s]]: a claim needs at least one supporting evidence note" % n.stem)
+        if n.stem not in members:
+            errs.append("[[%s]]: not reachable from any project's roots" % n.stem)
+        want = [wikilink(p) for p in members.get(n.stem, [])]
+        if (n.meta.get("projects") or []) != want:
+            errs.append("[[%s]]: projects field is stale; run `ygg sync`" % n.stem)
+    return errs
+
+
+def git(root, *args):
+    return subprocess.run(["git", "-C", str(root)] + list(args), check=True, stdout=subprocess.PIPE,
+                          stderr=subprocess.DEVNULL, universal_newlines=True).stdout
+
+
+def frozen_errors(vault):
+    """Done notes at HEAD must be unchanged (bar generated fields); relations touching them must stay."""
+    try:
+        diff = git(vault.root, "diff", "--relative", "--name-status", "HEAD", "--", "tree")
+    except (subprocess.CalledProcessError, OSError):
+        return []  # no git, or no commit yet
+    errs = []
+    for line in diff.splitlines():
+        parts = line.split("\t")
+        if parts[0].startswith("A"):
+            continue
+        try:
+            old_meta, old_raw, old_body = parse_frontmatter(git(vault.root, "show", "HEAD:./" + parts[1]))
+        except (subprocess.CalledProcessError, OSError, NoteError, ValueError):
+            continue
+        if old_meta.get("status") != "done":
+            continue
+        cur = vault.nodes.get(Path(parts[-1]).stem)
+        if parts[0].startswith(("D", "R")) or cur is None:
+            errs.append("%s: was done at HEAD and has been deleted or renamed" % parts[1])
+            continue
+        strip = lambda raw: {k: v for k, v in raw.items() if k not in UNFROZEN_FIELDS}
+        if strip(old_raw) != strip(cur.raw) or old_body.strip() != cur.body.strip():
+            errs.append("%s: was done at HEAD and has been changed; supersede it instead" % parts[1])
+    try:
+        old_rels = json.loads(git(vault.root, "show", "HEAD:./relations.json")).get("relations", {})
+    except (subprocess.CalledProcessError, OSError, ValueError):
+        old_rels = {}
+    uid = vault.by_uid()
+    for rid, r in old_rels.items():
+        if rid in vault.relations:
+            continue
+        ends = [uid.get(r.get("source")), uid.get(r.get("destination"))]
+        done = [n for n in ends if n is not None and n.status == "done"]
+        if done:
+            errs.append("relations.json: removed relation %s touches done note [[%s]]" % (rid, done[0].stem))
+    return errs
+
+
+def settings_errors(vault):
+    errs = []
+    dg = vault.root / ".obsidian" / "plugins" / DG_PLUGIN / "data.json"
+    try:
+        data = json.loads(dg.read_text(encoding="utf-8"))
+    except OSError:
+        return ["%s is missing; run `ygg init` on this vault" % vault.rel(dg)]
+    except ValueError as e:
+        return ["%s: %s" % (vault.rel(dg), e)]
+    ids = {x.get("id") for k in ("nodeTypes", "relationTypes") for x in data.get(k) or []}
+    missing = sorted((set(TYPE_ID.values()) | set(REL_ID.values())) - ids)
+    if missing:
+        errs.append("%s lacks the ygg types %s; run `ygg init` again" % (vault.rel(dg), ", ".join(missing)))
+    if data.get("spacePassword"):
+        errs.append("%s holds a sync password; turn sync off before committing" % vault.rel(dg))
+    try:
+        version = json.loads((vault.root / "ygg.json").read_text(encoding="utf-8")).get("spec_version")
+    except (OSError, ValueError):
+        version = None
+    if version != SPEC_VERSION:
+        errs.append("ygg.json spec_version is %r, this ygg is %d; run `ygg init` to upgrade" % (version, SPEC_VERSION))
+    return errs
+
+
+def note_errors(n, vault):
+    return validate_project(n, vault) if n.path.parent.name == "ideas" else validate_node(n, vault)
+
+
+# --- Plugin settings and templates ------------------------------------------------
+
+def template_name(t):
+    return "ygg-" + t
+
+
+def template_text(t):
+    fm = "---\nstatus: open\npriority: normal\n"
+    if t in CONFIDENCE:
+        fm += "confidence: low\n"
+    return fm + "---\n\n" + "\n".join("## %s\n" % s for s in TYPES[t]["sections"])
+
+
+def dg_schema():
+    node_types = [dict(id=TYPE_ID[t], name=v["name"], format=v["prefix"] + "{content}", color=v["color"],
+                       description=v["description"], template=template_name(t), folderPath="tree",
+                       created=T0, modified=T0) for t, v in TYPES.items()]
+    rel_types = [dict(id=REL_ID[r], label=v[0], complement=v[1], color=v[2], created=T0, modified=T0)
+                 for r, v in RELATIONS.items()]
+    pairs = [dict(id="rel3_ygg_%s_%s_%s" % (s, r, d), sourceId=TYPE_ID[s], destinationId=TYPE_ID[d],
+                  relationshipTypeId=REL_ID[r], created=T0, modified=T0)
+             for r, v in RELATIONS.items() for s, d in v[3]]
+    return node_types, rel_types, pairs
+
+
+def merge_by(existing, new, keys):
+    """Replace entries of `existing` that share an id or name with an entry of `new`."""
+    out = []
+    for e in existing or []:
+        if not any(e.get(k) is not None and e.get(k) == n.get(k) for n in new for k in keys):
+            out.append(e)
+    return out + new
+
+
+def write_json(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def read_json(path):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+# --- Commands ------------------------------------------------------------------
+
+def open_vault(a):
+    return Vault(a.vault or find_vault(os.getcwd()))
+
+
+def read_body(path):
+    return sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
+
+
+def default_body(t):
+    return "\n".join("## %s\n" % s for s in TYPES[t]["sections"])
+
+
+def check_note(n, vault):
+    errs = note_errors(n, vault)
+    if errs:
+        die("%s:\n  " % vault.rel(n.path) + "\n  ".join(errs))
+
+
+def editable(vault, name, kinds=("node",)):
+    n = vault.resolve(name, kinds)
+    if n.status == "done":
+        die("[[%s]] is done and frozen; create a new %s that supersedes it" % (n.stem, n.type))
+    return n
+
+
+def add_relation(vault, rel, s, d):
+    if (s.type, d.type) not in RELATIONS[rel][3]:
+        die("%s cannot go from a %s to a %s" % (rel, s.type, d.type))
+    for r in vault.relations.values():
+        if (r.get("type"), r.get("source"), r.get("destination")) == (REL_ID[rel], s.uid, d.uid):
+            die("[[%s]] already %s [[%s]]" % (s.stem, RELATIONS[rel][0], d.stem))
+    rid = uuid7()
+    vault.relations[rid] = {"id": rid, "type": REL_ID[rel], "source": s.uid, "destination": d.uid,
+                            "created": int(time.time() * 1000)}
+
+
+def parse_rel(spec, flag):
+    rel, sep, name = spec.partition(":")
+    if not sep or rel not in RELATIONS:
+        die("%s must be REL:NOTE with REL one of %s, got %r" % (flag, ", ".join(RELATIONS), spec))
+    return rel, name.strip()
+
+
+def touch(n):
+    n.set("dateModified", now())
+
+
+def finish(vault, notes):
+    vault.save_relations()
+    vault.sync(quiet=True)
+    for n in notes:
+        print(vault.rel(n.path))
+
+
+def apply_fields(n, a):
+    for k in ("priority", "confidence", "scheduled", "run", "run_start", "run_end", "tree", "citekey",
+              "location", "outcome", "legacy_ref"):
+        v = getattr(a, k, None)
+        if v:
+            n.set(k, v)
+    for k in ("n_animals", "n_recordings"):
+        v = getattr(a, k, None)
+        if v is not None:
+            n.set(k, v)
+    for k, vals in (("data", getattr(a, "add_data", [])), ("figures", getattr(a, "add_figure", []))):
+        for v in vals or []:
+            cur = list(n.meta.get(k) or [])
+            if v not in cur:
+                n.set(k, cur + [v])
+
+
+def cmd_init(a):
+    root = Path(a.path).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    for d in ("tree", "ideas", "templates"):
+        (root / d).mkdir(exist_ok=True)
+        if d != "templates" and not any((root / d).iterdir()):
+            (root / d / ".gitkeep").touch()
+    write_json(root / "ygg.json", {"spec_version": SPEC_VERSION})
+    if not (root / "relations.json").exists():
+        write_json(root / "relations.json", {"version": 1, "lastModified": 0, "relations": {}})
+    for t in TYPES:
+        (root / "templates" / (template_name(t) + ".md")).write_text(template_text(t), encoding="utf-8")
+    ob = root / ".obsidian"
+    templates = read_json(ob / "templates.json")
+    templates["folder"] = "templates"
+    write_json(ob / "templates.json", templates)
+
+    dg_path = ob / "plugins" / DG_PLUGIN / "data.json"
+    dg = read_json(dg_path)
+    old_names = {x.get("name") for x in dg.get("nodeTypes") or []} - {v["name"] for v in TYPES.values()}
+    node_types, rel_types, pairs = dg_schema()
+    dg["nodeTypes"] = merge_by(dg.get("nodeTypes"), node_types, ("id", "name"))
+    dg["relationTypes"] = merge_by(dg.get("relationTypes"), rel_types, ("id", "label"))
+    dg["discourseRelations"] = [x for x in merge_by(dg.get("discourseRelations"), pairs, ("id",))
+                                if x.get("relationshipTypeId") in {r["id"] for r in dg["relationTypes"]}]
+    dg.setdefault("nodesFolderPath", "tree")
+    dg.setdefault("canvasFolderPath", "canvas")
+    write_json(dg_path, dg)
+    if old_names:
+        warn("the Discourse Graph settings also hold other node types: %s" % ", ".join(sorted(old_names)))
+
+    tn_path = ob / "plugins" / TN_PLUGIN / "data.json"
+    tn = read_json(tn_path)
+    tn.update({"taskIdentificationMethod": "property", "taskPropertyName": "nodeTypeId",
+               "taskPropertyValue": "", "tasksFolder": "tree", "storeTitleInFilename": True,
+               "starterNoteCreated": True})
+    write_json(tn_path, tn)
+    print("initialised %s (spec version %d)" % (root, SPEC_VERSION))
+    print("Open it as an Obsidian vault and install the Discourse Graph and TaskNotes community plugins.")
+    if a.project:
+        a.vault, a.type, a.title, a.root, a.body = str(root), "project", a.project, [], None
+        cmd_new(a)
+
+
+def cmd_new(a):
+    vault = open_vault(a)
+    if a.type == "project":
+        stem = a.id or slugify(a.title)
+        if stem in vault.projects:
+            die("project %r already exists" % stem)
+        meta = {"type": "project", "title": a.title, "created": a.created or today(),
+                "roots": [wikilink(vault.resolve(r).stem) for r in a.root]}
+        body = read_body(a.body) if a.body else "## Summary\n\n## Findings\n"
+        p = Note(vault.root / "ideas" / (stem + ".md"), meta, {}, body)
+        vault.projects[stem] = p
+        check_note(p, vault)
+        p.save()
+        finish(vault, [p])
+        return
+    spec = TYPES[a.type]
+    content = a.title[len(spec["prefix"]):] if a.title.startswith(spec["prefix"]) else a.title
+    if BAD_NAME_RE.search(content):
+        die('titles cannot contain any of \\ / : * ? " < > | # ^ [ ]')
+    stem = spec["prefix"] + content.strip()
+    if stem in vault.nodes or (vault.root / "tree" / (stem + ".md")).exists():
+        die("[[%s]] already exists" % stem)
+    stamp = a.created or now()
+    meta = {"nodeTypeId": TYPE_ID[a.type], "nodeInstanceId": uuid7(), "status": a.status,
+            "priority": a.priority or "normal", "dateCreated": stamp, "dateModified": stamp}
+    if a.type in CONFIDENCE:
+        meta["confidence"] = a.confidence or "low"
+    if a.status == "done":
+        meta["completedDate"] = str(stamp)[:10]
+    n = Note(vault.root / "tree" / (stem + ".md"), meta, {}, read_body(a.body) if a.body else default_body(a.type))
+    a.priority = a.confidence = None
+    apply_fields(n, a)
+    links = [(r, n, vault.resolve(t)) for r, t in (parse_rel(s, "--link") for s in a.link)]
+    links += [(r, vault.resolve(t), n) for r, t in (parse_rel(s, "--link-from") for s in a.link_from)]
+    vault.nodes[stem] = n
+    check_note(n, vault)
+    for rel, s, d in links:
+        add_relation(vault, rel, s, d)
+    n.save()
+    finish(vault, [n])
+
+
+def cmd_link(a):
+    vault = open_vault(a)
+    s, d = vault.resolve(a.source), vault.resolve(a.target)
+    add_relation(vault, a.rel, s, d)
+    finish(vault, [])
+    print("[[%s]] %s [[%s]]" % (s.stem, RELATIONS[a.rel][0], d.stem))
+
+
+def cmd_unlink(a):
+    vault = open_vault(a)
+    s, d = vault.resolve(a.source), vault.resolve(a.target)
+    for n in (s, d):
+        if n.status == "done":
+            die("[[%s]] is done; relations touching a done note cannot be removed" % n.stem)
+    hits = [rid for rid, r in vault.relations.items()
+            if (r.get("type"), r.get("source"), r.get("destination")) == (REL_ID[a.rel], s.uid, d.uid)]
+    if not hits:
+        die("[[%s]] does not %s [[%s]]" % (s.stem, RELATIONS[a.rel][0], d.stem))
+    for rid in hits:
+        del vault.relations[rid]
+    finish(vault, [])
+
+
+def cmd_set(a):
+    vault = open_vault(a)
+    n = editable(vault, a.note, ("node", "project"))
+    if n.type == "project":
+        roots = [unlink_name(r) for r in n.meta.get("roots") or []]
+        roots += [vault.resolve(r).stem for r in a.add_root if vault.resolve(r).stem not in roots]
+        drop = {vault.resolve(r).stem for r in a.remove_root}
+        n.set("roots", [wikilink(r) for r in roots if r not in drop])
+        if a.title:
+            n.set("title", a.title)
+    else:
+        if a.status:
+            n.set("status", a.status)
+        apply_fields(n, a)
+        touch(n)
+    if a.body:
+        n.body = read_body(a.body)
+    check_note(n, vault)
+    n.save()
+    finish(vault, [n])
+
+
+def cmd_done(a):
+    vault = open_vault(a)
+    n = editable(vault, a.note)
+    if a.outcome:
+        n.set("outcome", a.outcome)
+    n.set("status", "done")
+    n.set("completedDate", today())
+    touch(n)
+    check_note(n, vault)
+    n.save()
+    finish(vault, [n])
+
+
+def describe(n):
+    bits = [n.status or "?"]
+    for k in ("confidence", "outcome"):
+        if n.meta.get(k):
+            bits.append(str(n.meta[k]))
+    return "[[%s]] (%s)" % (n.stem, ", ".join(bits))
+
+
+def cmd_show(a):
+    vault = open_vault(a)
+    n = vault.resolve(a.note, ("node", "project"))
+    print(n.path.read_text(encoding="utf-8").rstrip())
+    if n.type == "project":
+        members = defaultdict(list)
+        for stem, ps in vault.membership().items():
+            if n.stem in ps:
+                members[vault.nodes[stem].type].append(vault.nodes[stem])
+        print("\n<!-- members (generated) -->")
+        for t in TYPES:
+            for m in sorted(members[t], key=lambda m: m.stem):
+                print("- %s" % describe(m))
+        return
+    print("\n<!-- relations (generated) -->")
+    for rel, s, d in vault.edges():
+        if s is n:
+            print("- %s %s" % (RELATIONS[rel][0], describe(d)))
+        elif d is n:
+            print("- %s %s" % (RELATIONS[rel][1], describe(s)))
+    if n.type == "claim":
+        scope = vault.scope(n)
+        print("- established on: %s" % (", ".join(wikilink(s) for s in scope) or "no dataset"))
+
+
+def cmd_report(a):
+    vault = open_vault(a)
+    edges = vault.edges()
+    answered = {d.stem for rel, s, d in edges if rel in ("addresses", "informs")}
+    members = vault.membership()
+    nodes = sorted(vault.nodes.values(), key=lambda n: (str(n.meta.get("dateCreated")), n.stem))
+    groups = [
+        ("In progress", [n for n in nodes if n.status == "in-progress"]),
+        ("Open", [n for n in nodes if n.status == "open"]),
+        ("Questions nothing addresses or informs yet", [n for n in nodes if n.type == "question"
+                                                       and n.stem not in answered]),
+        ("Claims at low confidence", [n for n in nodes if n.type == "claim" and n.meta.get("confidence") == "low"]),
+        ("Not in any project", [n for n in nodes if n.stem not in members]),
+    ]
+    for title, group in groups:
+        print("## %s (%d)" % (title, len(group)))
+        for n in group:
+            print("- %s [%s]" % (describe(n), ", ".join(members.get(n.stem, [])) or "no project"))
+        print()
+
+
+def cmd_sync(a):
+    vault = open_vault(a)
+    changed = vault.sync()
+    print("%d notes synced" % len(changed))
+
+
+def all_errors(vault):
+    errors = list(vault.errors)
+    for n in list(vault.nodes.values()) + list(vault.projects.values()):
+        errors += ["%s: %s" % (vault.rel(n.path), e) for e in note_errors(n, vault)]
+    uids = defaultdict(list)
+    for n in vault.nodes.values():
+        uids[n.uid].append(n.stem)
+    errors += ["nodeInstanceId %s is shared by %s" % (u, ", ".join(s)) for u, s in uids.items() if u and len(s) > 1]
+    return (errors + relation_errors(vault) + cycle_errors(vault) + graph_errors(vault)
+            + frozen_errors(vault) + settings_errors(vault))
+
+
+def cmd_check(a):
+    vault = open_vault(a)
+    errors = all_errors(vault)
+    for e in errors:
+        print(e)
+    print("%d nodes, %d projects, %d relations, %d errors" % (
+        len(vault.nodes), len(vault.projects), len(vault.relations), len(errors)))
+    sys.exit(1 if errors else 0)
+
+
+def outline(vault):
+    """Print each project's tree, from its roots down through follow-ups, claims and evidence."""
+    edges = vault.edges()
+    children = defaultdict(list)
+    for rel, s, d in edges:
+        if rel in ("follows-from", "addresses", "informs", "supports", "opposes"):
+            children[d.stem].append((rel, s))
+    for p in vault.projects.values():
+        print("# %s (%s)" % (p.meta.get("title"), p.stem))
+        seen = set()
+
+        def walk(n, depth, how):
+            print("%s- %s%s" % ("  " * depth, how + " " if how else "", describe(n)))
+            if n.stem in seen:
+                return
+            seen.add(n.stem)
+            for rel, c in sorted(children[n.stem], key=lambda x: (x[0], x[1].stem)):
+                walk(c, depth + 1, RELATIONS[rel][1])
+
+        for r in p.meta.get("roots") or []:
+            n = vault.nodes.get(unlink_name(r))
+            if n:
+                walk(n, 0, "")
+        print()
+
+
+def cmd_compress(a):
+    target = open_vault(a)
+    src = Path(a.tree).resolve()
+    if not src.exists():
+        die("%s does not exist" % src)
+    if (src / "ygg.json").exists():
+        project = Vault(src)
+        errs = all_errors(project)
+        if errs:
+            warn("%s has %d check errors; run `ygg --vault %s check`" % (src, len(errs), src))
+        outline(project)
+    else:
+        print("%s is not a ygg tree; recording it as a Source only.\n" % src)
+    base = src if src.is_dir() else src.parent
+    try:
+        top = Path(git(base, "rev-parse", "--show-toplevel").strip())
+        commit = git(base, "rev-parse", "--short", "HEAD").strip()
+        dirty = git(top, "status", "--porcelain", "--", str(src)).strip()
+    except (subprocess.CalledProcessError, OSError):
+        die("%s is not in a git repository with a commit" % src)
+    ref = "%s@%s:%s" % (top.name, commit, src.relative_to(top).as_posix() or ".")
+    if dirty and not a.dry_run:
+        die("%s has uncommitted changes; commit them before compressing so the Source can cite a commit" % src)
+    if dirty:
+        warn("%s has uncommitted changes; commit them before recording the Source" % src)
+    title = a.title or "%s research tree" % top.name
+    existing = [n for n in target.nodes.values() if n.type == "source" and n.meta.get("tree") == ref]
+    if existing:
+        print("Source for %s: [[%s]] (already recorded)" % (ref, existing[0].stem))
+        return
+    same_tree = lambda n: re.sub(r"@\w+:", ":", str(n.meta.get("tree", ""))) == re.sub(r"@\w+:", ":", ref)
+    older = sorted((n for n in target.nodes.values() if n.type == "source" and same_tree(n)),
+                   key=lambda n: str(n.meta.get("dateCreated")))
+    if older or "@" + title in target.nodes:
+        title += " %s" % commit
+    if a.dry_run:
+        print("would record Source [[@%s]] with tree: %s" % (title, ref))
+        return
+    body = ("## Description\n\nThe detailed research tree of %s at commit %s. Compressed nodes are derived "
+            "from it; walk it for detailed methods and dead ends.\n" % (top.name, commit))
+    new_source(target, title, ref, body, older[-1:])
+    print("\nNext: create the compressed Questions, Claims and Evidence with `ygg new`, deriving the "
+          "Evidence from this Source (and its Dataset) with --link derived-from:..., then add the roots "
+          "to the project note in ideas/.")
+
+
+def new_source(vault, title, ref, body, supersedes):
+    stem = "@" + title
+    stamp = now()
+    meta = {"nodeTypeId": TYPE_ID["source"], "nodeInstanceId": uuid7(), "status": "done", "priority": "normal",
+            "dateCreated": stamp, "dateModified": stamp, "completedDate": stamp[:10], "tree": ref}
+    n = Note(vault.root / "tree" / (stem + ".md"), meta, {}, body)
+    vault.nodes[stem] = n
+    check_note(n, vault)
+    for old in supersedes:
+        add_relation(vault, "supersedes", n, old)
+    n.save()
+    finish(vault, [n])
+
+
+def cmd_schema(a):
+    node_types, rel_types, pairs = dg_schema()
+    data = {"version": 1, "exportedAt": "2026-10-21T00:00:00.000Z", "pluginVersion": "1.5.2",
+            "vaultName": "yggdrasil", "vaultId": "yggdrasil", "nodeTypes": node_types,
+            "relationTypes": rel_types, "discourseRelations": pairs,
+            "templates": [{"name": template_name(t), "content": template_text(t)} for t in TYPES]}
+    text = json.dumps(data, indent=2) + "\n"
+    if a.out:
+        Path(a.out).write_text(text, encoding="utf-8")
+        print(a.out)
+    else:
+        sys.stdout.write(text)
+
+
+# --- CLI -----------------------------------------------------------------------
+
+def add_field_args(p):
+    p.add_argument("--priority", choices=PRIORITIES)
+    p.add_argument("--confidence", choices=sorted(set(CONFIDENCE["claim"])), help="claims and evidence")
+    p.add_argument("--scheduled", help="YYYY-MM-DD")
+    p.add_argument("--outcome", choices=OUTCOMES, help="evidence")
+    p.add_argument("--run", help="repository@commit:path to the run script (sources)")
+    p.add_argument("--run-start", dest="run_start")
+    p.add_argument("--run-end", dest="run_end")
+    p.add_argument("--tree", help="repository@commit:path to a detailed project tree (sources)")
+    p.add_argument("--citekey", help="Zotero / BibTeX key (sources)")
+    p.add_argument("--add-data", dest="add_data", action="append", default=[], help="data location (sources)")
+    p.add_argument("--add-figure", dest="add_figure", action="append", default=[],
+                   help="repository@commit:path or absolute cluster path (sources)")
+    p.add_argument("--location", help="datasets")
+    p.add_argument("--n-animals", dest="n_animals", type=int, help="datasets")
+    p.add_argument("--n-recordings", dest="n_recordings", type=int, help="datasets")
+    p.add_argument("--legacy-ref", dest="legacy_ref", help="where a backfilled note came from")
+    p.add_argument("--body", help="markdown file with the body sections, or - for stdin")
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="ygg", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--vault", help="tree root (the folder with ygg.json); default: found from the cwd")
+    sub = ap.add_subparsers(dest="cmd")
+    sub.required = True
+    rels = ", ".join(RELATIONS)
+
+    p = sub.add_parser("init", help="make PATH a ygg tree: folders, plugin settings, templates")
+    p.add_argument("path", nargs="?", default=".")
+    p.add_argument("--project", help="also create a project note with this title")
+    p.add_argument("--id", help=argparse.SUPPRESS)
+    p.add_argument("--created", help=argparse.SUPPRESS)
+    p.set_defaults(func=cmd_init)
+
+    p = sub.add_parser("new", help="create a node or a project note")
+    p.add_argument("type", choices=NODE_TYPES + ["project"])
+    p.add_argument("title", help="the content after the type prefix, e.g. 'Head bending is continuously driven'")
+    p.add_argument("--link", action="append", default=[], help="REL:NOTE, the new note REL NOTE; REL in " + rels)
+    p.add_argument("--link-from", dest="link_from", action="append", default=[],
+                   help="REL:NOTE, NOTE REL the new note")
+    p.add_argument("--status", choices=STATUSES, default="open")
+    p.add_argument("--created", help="ISO date or datetime; defaults to now (use when backfilling)")
+    p.add_argument("--root", action="append", default=[], help="root node (projects), repeatable")
+    p.add_argument("--id", help="filename slug (projects)")
+    add_field_args(p)
+    p.set_defaults(func=cmd_new)
+
+    for name, func, h in (("link", cmd_link, "add a relation SOURCE REL TARGET"),
+                          ("unlink", cmd_unlink, "remove a relation; neither end may be done")):
+        p = sub.add_parser(name, help=h)
+        p.add_argument("source")
+        p.add_argument("rel", choices=list(RELATIONS))
+        p.add_argument("target")
+        p.set_defaults(func=func)
+
+    p = sub.add_parser("set", help="change fields or the body of an editable note")
+    p.add_argument("note")
+    p.add_argument("--status", choices=["open", "in-progress"], help="use `ygg done` to finish")
+    p.add_argument("--title", help="project title")
+    p.add_argument("--add-root", dest="add_root", action="append", default=[], help="projects")
+    p.add_argument("--remove-root", dest="remove_root", action="append", default=[], help="projects")
+    add_field_args(p)
+    p.set_defaults(func=cmd_set)
+
+    p = sub.add_parser("done", help="finish and freeze a node")
+    p.add_argument("note")
+    p.add_argument("--outcome", choices=OUTCOMES, help="required for evidence")
+    p.set_defaults(func=cmd_done)
+
+    p = sub.add_parser("show", help="print a note with its relations, or a project with its members")
+    p.add_argument("note")
+    p.set_defaults(func=cmd_show)
+
+    p = sub.add_parser("report", help="list work in progress, open nodes and loose ends")
+    p.set_defaults(func=cmd_report)
+
+    p = sub.add_parser("sync", help="regenerate projects: fields and fill missing TaskNotes dates")
+    p.set_defaults(func=cmd_sync)
+
+    p = sub.add_parser("check", help="validate the tree; exit 1 on any error")
+    p.set_defaults(func=cmd_check)
+
+    p = sub.add_parser("compress", help="outline a project's detailed tree and record it as a Source here")
+    p.add_argument("tree", help="the project's ygg tree, or any committed file or folder")
+    p.add_argument("--title", help="Source title; default '<repository> research tree'")
+    p.add_argument("--dry-run", dest="dry_run", action="store_true", help="outline only; record nothing")
+    p.set_defaults(func=cmd_compress)
+
+    p = sub.add_parser("schema", help="print the Discourse Graph schema export (for manual import)")
+    p.add_argument("--out")
+    p.set_defaults(func=cmd_schema)
+
+    a = ap.parse_args(argv)
+    a.func(a)
+
+
+if __name__ == "__main__":
+    main()

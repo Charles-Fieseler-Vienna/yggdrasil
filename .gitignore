@@ -248,3 +248,9 @@ __marimo__/
 .zshrc
 .ripgreprc
 .claude/settings.local.json
+
+# Obsidian plugin code: installed per vault. Their data.json settings are tracked;
+# ygg reads the Discourse Graph type ids from them.
+.obsidian/plugins/*/main.js
+.obsidian/plugins/*/manifest.json
+.obsidian/plugins/*/styles.css
