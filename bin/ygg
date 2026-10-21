@@ -1,0 +1,10 @@
+#!/bin/sh
+# The ygg plugin puts this on the Bash tool's PATH. Only `serve` needs the web app's dependencies,
+# which uv provides from the script's header; every other command runs on a bare python3.
+script="$(dirname "$(readlink -f "$0")")/../scripts/ygg"
+for arg in "$@"; do
+  if [ "$arg" = serve ] && command -v uv >/dev/null 2>&1; then
+    exec uv run --quiet --script "$script" "$@"
+  fi
+done
+exec python3 "$script" "$@"

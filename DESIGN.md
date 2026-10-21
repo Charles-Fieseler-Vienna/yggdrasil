@@ -1,6 +1,6 @@
 # Research Notes Design
 
-> **Status: draft (2026-10-21).** This version moves the format onto the Discourse Graph (DG) Obsidian plugin and TaskNotes frontmatter, managed with `scripts/ygg`.
+> **Status: draft (2026-10-21).** This version moves the format onto the Discourse Graph (DG) Obsidian plugin and TaskNotes frontmatter, managed with `ygg`, which ships as a Claude Code plugin.
 
 ## Problem
 
@@ -19,7 +19,7 @@ The record has to work for ongoing work, not only for finished results: what is 
 
 ## Design
 
-The repository is an Obsidian vault of plain Markdown, maintained mainly by Claude (see `CLAUDE.md`) through `scripts/ygg`. It holds only **compressed** nodes: the generalizable questions, claims, evidence and dead ends of each project. Each project keeps its detailed tree in its own repository, in the same format (see [Trees in projects](#trees-in-projects)). Three standards define the format, and the repository adds only what they lack:
+A **tree** is an Obsidian vault of plain Markdown, maintained mainly by Claude through `ygg`. The **main tree** (`Yggdrasil-charlie`, a separate private repository) holds only **compressed** nodes: the generalizable questions, claims, evidence and dead ends of each project. Each project keeps its detailed tree in its own repository, in the same format (see [Trees in projects](#trees-in-projects)). This repository, `yggdrasil`, holds no tree: it is the tool, the web app and the Claude Code plugin that teaches Claude the format (see [Plugin](#plugin)). Three standards define the format, and ygg adds only what they lack:
 
 | Layer | Standard | Owns |
 |---|---|---|
@@ -27,22 +27,36 @@ The repository is an Obsidian vault of plain Markdown, maintained mainly by Clau
 | Work status | [TaskNotes spec](https://github.com/callumalpass/tasknotes-spec) 0.2.0 | `status`, `priority`, `scheduled`, dates, `projects` |
 | Research record | this document | `confidence`, `outcome`, evidence references, freezing, project membership, `check` |
 
-The repository is **text only**. Figures, data and code live in project repositories or on the cluster and are referenced, never copied in.
+A tree is **text only**. Figures, data and code live in project repositories or on the cluster and are referenced, never copied in.
+
+A tree (the main tree, or `research/tree/` in a project):
 
 ```text
-yggdrasil/
+Yggdrasil-charlie/
 ├── tree/             # every graph node: Question, Claim, Evidence, Source, Dataset
 ├── ideas/            # project and paper notes: light frontmatter, free prose
 ├── templates/        # one DG node template per type (written by `ygg init`)
 ├── relations.json    # every relation; written by the DG plugin or ygg
 ├── ygg.json          # marks the folder as a ygg tree, with its spec version
-├── .obsidian/plugins/{discourse-graphs,tasknotes}/data.json   # plugin settings (written by `ygg init`)
+├── NOTEBOOK.md       # the lab notebook (project trees; see Notebook)
+└── .obsidian/plugins/{discourse-graphs,tasknotes}/data.json   # plugin settings (written by `ygg init`)
+```
+
+The tool:
+
+```text
+yggdrasil/
+├── .claude-plugin/   # plugin.json and marketplace.json (see Plugin)
+├── bin/ygg           # the command, put on Claude's PATH by the plugin
+├── hooks/            # the SessionStart hook
+├── skills/           # tree, paper, digest, brainstorm, handoff
 ├── schema/
-│   └── dg-schema-yggdrasil.json   # the same schema as a DG export, for manual import (`ygg schema`)
+│   └── dg-schema-yggdrasil.json   # the schema as a DG export, for manual import (`ygg schema`)
 ├── scripts/
-│   ├── ygg
-│   └── hooks/pre-commit
-├── CLAUDE.md
+│   ├── ygg           # the CLI
+│   ├── ygg_server.py # the web app's server
+│   └── web/          # the web app's page
+├── CLAUDE.md         # how to develop the tool
 └── DESIGN.md
 ```
 
@@ -192,7 +206,7 @@ The walk never goes back up from a member Evidence note to other Claims it suppo
 
 ## Compression
 
-This repository holds only compressed nodes. Each project keeps its own detailed tree in its own repository: every step of the logical progression, every small methods question, every diagnostic. `Cosyne_2027@1dffa02:research/TREE.md` is the reference example, with about 50 nodes over ten days. Most of it is not useful to other projects.
+The main tree holds only compressed nodes. Each project keeps its own detailed tree in its own repository: every step of the logical progression, every small methods question, every diagnostic. `Cosyne_2027@1dffa02:research/TREE.md` is the reference example, with about 50 nodes over ten days. Most of it is not useful to other projects.
 
 When a project, or a phase of one, is finished, its detailed tree is **compressed** into a few generalizable nodes. The test for keeping something is whether it is a generalizable conclusion, rather than a narrowly scoped or very specific methods question, claim or result. Compression is a judgement made with the user, not an automatic step.
 
@@ -200,7 +214,7 @@ When a project, or a phase of one, is finished, its detailed tree is **compresse
 - A compressed Evidence note typically summarises an investigation that spanned many runs.
 - Compressed Evidence is `derived from` a Source pointing to the detailed tree at a fixed commit, so a new project that needs a detailed method can walk down into it, and from the Dataset it rests on.
 - The project's `roots` list the compressed root nodes.
-- Papers are not copied twice. `ygg compress` lists each paper Source of the project tree with the Source here for the same paper (by Zotero key or DOI), if any; compressed Evidence derives from that one. A paper with neither is flagged, to be looked up in Zotero first.
+- Papers are not copied twice. `ygg compress` lists each paper Source of the project tree with the main tree's Source for the same paper (by Zotero key or DOI), if any; compressed Evidence derives from that one. A paper with neither is flagged, to be looked up in Zotero first.
 
 ## Papers
 
@@ -224,9 +238,9 @@ Data lives on the shared cluster and is not version-controlled. To keep it as st
 
 ## Trees in projects
 
-A project keeps its detailed tree in its own repository, e.g. `Cosyne_2027/research/tree/`, made with `ygg init` and opened as its own Obsidian vault. It uses the same types, relations, frontmatter and checks as this repository, at full granularity: every small run, diagnostic and methods question. That is where day-to-day work is tracked (`status`, TaskNotes boards).
+A project keeps its detailed tree in its own repository, e.g. `Cosyne_2027/research/tree/`, made with `ygg init` and opened as its own Obsidian vault. It uses the same types, relations, frontmatter and checks as the main tree, at full granularity: every small run, diagnostic and methods question. That is where day-to-day work is tracked (`status`, TaskNotes boards).
 
-When a project or phase is finished, `ygg compress PATH` (run in this repository) prints the project tree's outline and records it here as a Source at its current commit. The compressed nodes are then written by hand with the user (see [Compression](#compression)).
+When a project or phase is finished, `ygg compress PATH` (run in the main tree) prints the project tree's outline and records it there as a Source at its current commit. The compressed nodes are then written by hand with the user (see [Compression](#compression)).
 
 ## Notebook
 
@@ -236,19 +250,19 @@ A project tree has a lab notebook, `NOTEBOOK.md` at its root (made by `ygg init`
 |---|---|---|---|
 | Notebook | project repository | everything, dated, unedited | as the work happens, by the user and by Claude |
 | Project tree | project repository | the graph of settled results, open questions and runs | when something settles |
-| yggdrasil | this repository | the compressed, generalizable part | at the end of a phase |
+| Main tree | Yggdrasil-charlie | the compressed, generalizable part | at the end of a phase |
 
 Each entry is a `## YYYY-MM-DD HH:MM` heading, optionally `— tag` (`decision`, `dead-end`, `run`, `idea`, `handoff`), and free Markdown that links nodes as `[[...]]`. Entries are appended, newest last, and never edited or reordered; a correction is a new entry. `ygg log` appends one; `ygg check` warns, without failing, about links to notes that do not exist. ygg never rewrites the notebook.
 
 There is no separate decision log. A decision is first an entry; once it holds, it becomes a Claim (about a method, if it is one) with its Evidence, which may cite the entry's date.
 
-A **handoff** is an entry tagged `handoff`: where things stand, what is running (job IDs, output paths), the next steps as links to nodes, and loose state only the session knows (uncommitted code, scratch paths). Before writing one, the notebook since the last handoff is distilled into the tree: runs, results, decisions and dead ends become nodes, and the next one to three notes get `priority: high`. To catch up, `ygg report --since handoff` lists the high-priority and in-progress notes, the notes changed and the notebook entries since the last handoff. The `ygg-handoff` skill does both. yggdrasil itself, being compressed, has no notebook.
+A **handoff** is an entry tagged `handoff`: where things stand, what is running (job IDs, output paths), the next steps as links to nodes, and loose state only the session knows (uncommitted code, scratch paths). Before writing one, the notebook since the last handoff is distilled into the tree: runs, results, decisions and dead ends become nodes, and the next one to three notes get `priority: high`. To catch up, `ygg report --since handoff` lists the high-priority and in-progress notes, the notes changed and the notebook entries since the last handoff. The `ygg:handoff` skill does both. The main tree, being compressed, mostly does without a notebook.
 
 ## Tooling
 
-`scripts/ygg` is the only writer of notes and `relations.json` besides the plugins' own UIs. It finds its tree by looking for `ygg.json` from the current directory up, or takes `--vault PATH`. Put it on your PATH with `ln -s "$PWD/scripts/ygg" ~/.local/bin/ygg`.
+`scripts/ygg` is the only writer of notes and `relations.json` besides the Obsidian plugins' own UIs. It finds its tree by looking for `ygg.json` from the current directory up, or takes `--vault PATH`. The Claude Code plugin puts it on Claude's PATH as `ygg` (`bin/ygg`); for your own shell, `ln -s "$PWD/bin/ygg" ~/.local/bin/ygg`.
 
-It is a [uv](https://docs.astral.sh/uv/) script: its first lines declare Python 3.10+ and the web app's dependencies (FastAPI, uvicorn, watchfiles), and running it directly lets uv provide them. Every command but `serve` is standard library only, so `python3 scripts/ygg ...` also works where uv is missing (the pre-commit hook runs it that way).
+It is a [uv](https://docs.astral.sh/uv/) script: its first lines declare Python 3.10+ and the web app's dependencies (FastAPI, uvicorn, watchfiles), and running it directly lets uv provide them. Every command but `serve` is standard library only, so `python3 scripts/ygg ...` also works where uv is missing. `bin/ygg` uses uv only for `serve` and runs everything else on `python3`.
 
 | Command | Does |
 |---|---|
@@ -312,4 +326,23 @@ Every change runs the matching CLI command (`new`, `link`, `unlink`, `set`, `don
 
 The server listens on 127.0.0.1 only, refuses requests whose `Host` is not `localhost` or `127.0.0.1` (against DNS rebinding), and requires a random per-run token, embedded in the page it serves, on every API call (the `X-Ygg-Token` header, or `?t=` for the event stream, which cannot send headers), so other web pages cannot read or change the tree.
 
-`scripts/hooks/pre-commit` runs `check`. Enable it with `git config core.hooksPath scripts/hooks`.
+A tree's repository can run `check` before each commit: the main tree has `.githooks/pre-commit`, enabled with `git config core.hooksPath .githooks`.
+
+## Plugin
+
+This repository is a Claude Code plugin, `ygg`, and its own one-plugin marketplace, `yggdrasil`. The plugin is what tells Claude how to work in a tree, so no tree or project repository needs a `CLAUDE.md` for it, and repositories without a tree see none of it.
+
+```bash
+claude plugin marketplace add ~/Current_work/repos/yggdrasil    # loads the plugin in place, so edits apply on restart
+claude plugin install ygg@yggdrasil
+```
+
+| Part | Does |
+|---|---|
+| `bin/ygg` | The `ygg` command on Claude's PATH. |
+| `hooks/session_start.py` | At session start, looks for a tree at or above the working directory, else up to three levels below it. If it finds one, it adds the rules in brief (load `ygg:tree`, change notes only with `ygg`, keep the notebook, offer a handoff) and where the work stands: counts, in-progress and high-priority notes, the last handoff and how many entries followed it. Elsewhere it prints nothing. |
+| `ygg:tree` | The working rules: the one rule, commands and allowed relations, runs, superseding, compression, the notebook, and how to write nodes. |
+| `ygg:paper` | Adds one paper as a Source (from Zotero) and records what it means for a project as Evidence. |
+| `ygg:digest` | Breaks a whole paper, usually one's own, into Questions, Claims and Evidence derived from it, with its Datasets and the open questions of its Discussion. Given the paper's code repository, it also links the script behind each figure as a run Source at the commit matching the paper, which the figure's Evidence derives from; the outputs are not rerun, so the paper stays the Source of the results. |
+| `ygg:brainstorm` | Interviews the user to grow a tree: new questions, connections across projects and papers, or a sketch of a new project; writes what is agreed. |
+| `ygg:handoff` | Distils the notebook into the tree and writes a handoff entry; on catching up, reads it back with `ygg report --since handoff`. |

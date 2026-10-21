@@ -1,0 +1,8 @@
+{
+  "name": "yggdrasil",
+  "description": "The ygg plugin for discourse-graph research trees",
+  "owner": { "name": "Charles Fieseler" },
+  "plugins": [
+    { "name": "ygg", "source": "./", "description": "Discourse-graph research trees with ygg" }
+  ]
+}

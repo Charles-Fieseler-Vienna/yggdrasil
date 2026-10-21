@@ -1,0 +1,10 @@
+{
+  "name": "ygg",
+  "displayName": "ygg research trees",
+  "version": "0.1.0",
+  "description": "Discourse-graph research trees: the ygg CLI on PATH, skills for papers, digests, brainstorming and handoffs, and a session hook that loads a tree's rules and last handoff",
+  "author": { "name": "Charles Fieseler" },
+  "repository": "https://github.com/Charles-Fieseler-Vienna/yggdrasil",
+  "license": "MIT",
+  "keywords": ["research", "discourse-graph", "obsidian", "zotero", "lab-notebook"]
+}
