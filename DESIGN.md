@@ -220,7 +220,9 @@ When a project or phase is finished, `ygg compress PATH` (run in this repository
 
 ## Tooling
 
-`scripts/ygg` (Python 3.7+, standard library only) is the only writer of notes and `relations.json` besides the plugins' own UIs. It finds its tree by looking for `ygg.json` from the current directory up, or takes `--vault PATH`. Put it on your PATH with `ln -s "$PWD/scripts/ygg" ~/.local/bin/ygg`.
+`scripts/ygg` is the only writer of notes and `relations.json` besides the plugins' own UIs. It finds its tree by looking for `ygg.json` from the current directory up, or takes `--vault PATH`. Put it on your PATH with `ln -s "$PWD/scripts/ygg" ~/.local/bin/ygg`.
+
+It is a [uv](https://docs.astral.sh/uv/) script: its first lines declare Python 3.10+ and the web app's dependencies (FastAPI, uvicorn, watchfiles), and running it directly lets uv provide them. Every command but `serve` is standard library only, so `python3 scripts/ygg ...` also works where uv is missing (the pre-commit hook runs it that way).
 
 | Command | Does |
 |---|---|
@@ -233,6 +235,7 @@ When a project or phase is finished, `ygg compress PATH` (run in this repository
 | `ygg report` | Lists work in progress, open nodes, unanswered questions, low-confidence claims and orphans. |
 | `ygg sync` | Regenerates `projects:` and fills in TaskNotes dates missing from notes made in Obsidian. |
 | `ygg compress PATH [--dry-run]` | Outlines a project tree and records it as a Source at its commit; refuses uncommitted trees. |
+| `ygg serve [--port N] [--open]` | Serves a local web app for browsing and editing the tree (see [Web app](#web-app)). |
 | `ygg view [--project P] [--around NOTE --depth N] [--hide TYPE] [--where KEY=VALUE]` | Writes `views/NAME.canvas`, the selection laid out as a tree with gaps highlighted (see [Canvas views](#canvas-views)). |
 | `ygg pull CANVAS` / `ygg watch [CANVAS...]` | Makes the notes and edges drawn on a canvas into nodes and relations, once or whenever it changes; watch also reflows the canvas when groups are folded. `ygg view` starts a watch on its canvas unless given `--no-watch`. |
 | `ygg check` | Validates everything; exits 1 on any error. |
@@ -252,6 +255,35 @@ Notes are named by filename, by the content after the type prefix, by `nodeInsta
 - `done` notes are unchanged since `HEAD` (bar `projects:` and `dateModified`), and relations touching them were not removed;
 - `run`, `tree` and `figures` are immutable references; only `.md` files are in `tree/` and `ideas/`;
 - the DG settings hold the ygg types and no sync password, and `ygg.json` matches the tool's spec version.
+
+### Web app
+
+`ygg serve` serves a web app at `http://localhost:8765/` (`--port`, `--open` to open the browser) until Ctrl-C.
+
+- The server is a FastAPI app in `scripts/ygg_server.py`, run by uvicorn. It rebuilds the graph from the files on every read, keeping no cache.
+- The page is in `scripts/web/`: React with [React Flow](https://reactflow.dev) for the graph. Each module is small: `graph.js` (what is shown; pure functions), `layout.js` (positions), `animate.js` (moving between layouts), `api.js`, `note.js` (the card), `edges.js` (the relation curves), `toolbar.js`, `panel.js`, `dialogs.js` and `main.js` (state). There is no build step. The libraries load from esm.sh at pinned versions through an import map, and `htm` stands in for JSX.
+
+The tree is drawn left to right with the same parent → child order as a canvas view: questions lead to their follow-ups, claims and informing evidence, claims to their evidence, evidence to its sources and datasets. Arrowheads mark each relation's real destination. Node colour is the type; the border marks gaps (red), open or in-progress notes (dashed blue) and weak ones (double yellow), as on a canvas.
+
+Folding is per node. Ctrl-click (Cmd-click on a Mac) a node to fold or unfold what is under it; a node is shown if it is a root or under an unfolded shown node, so a node shared by several parents appears as soon as any of them is unfolded. A folded node shows how many notes and gaps it hides; hidden gaps also tint it red. By default only the top questions are unfolded.
+
+The layout is a tidy tree, one column per level, with each node's children in a fixed order (by filename, so claims, then evidence, then follow-up questions). It is redone on every change, so unfolding a node only pushes what is below it down, and nothing is reordered. A node with several shown parents sits under the shallowest one, and keeps that place while it stays shown, so unfolding another of its parents does not move it; its other edges are still drawn. Each edge carries its arrowhead partway along the curve rather than at an end, since most relations point from child to parent and arrowheads at the parent would pile up. Changes are animated: the clicked node stays still, cards glide to their new places, newly shown ones grow out of their parent and hidden ones shrink back into it.
+
+Alt-click a node (or **Focus** in the side panel) to make it the view's only root: the view shows just it and what is under it, unfolded one level. A breadcrumb above the graph shows the trail of notes focused from the top, with **↑ Up** (focus on the note above), **Reset** (the whole tree, folded to the default) and links to each note on the trail. Alt-clicking a note under the focus extends the trail; anything else starts a new one from its shortest path to a top root.
+
+Fold state, focus trail, filters and the project choice are kept in the browser per vault. The toolbar filters by project and type, finds a note (unfolding a path down to it), and folds to the default or unfolds everything.
+
+Selecting a node shows its fields, its relations and its body, with a link to open it in Obsidian. From there:
+
+- **Connect to…**, then click another node: offers only the relations allowed between the two types, either way round, and not already present;
+- **New note here**: a node of any type that can relate to the selected one, created with its relation in one step (so never an orphan). The title is a short name that is also the filename (so no `?` or `:`); the body has one optional box per section of the type, each with a hint of what goes there;
+- **Set…** (status, confidence) and **Mark done…** (with an outcome for evidence) on editable notes;
+- **×** on a relation removes it, unless either end is done;
+- **New root question** adds a question to a project's roots.
+
+Every change runs the matching CLI command (`new`, `link`, `unlink`, `set`, `done`) in the server, so it passes the same checks, and a refusal is shown as that command's error. The server watches `tree/`, `ideas/` and `relations.json` and pushes a new version to the page (server-sent events at `/api/events`) when any changes, so edits made in Obsidian or with the CLI appear at once.
+
+The server listens on 127.0.0.1 only, refuses requests whose `Host` is not `localhost` or `127.0.0.1` (against DNS rebinding), and requires a random per-run token, embedded in the page it serves, on every API call (the `X-Ygg-Token` header, or `?t=` for the event stream, which cannot send headers), so other web pages cannot read or change the tree.
 
 ### Canvas views
 

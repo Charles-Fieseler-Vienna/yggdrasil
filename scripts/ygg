@@ -1,10 +1,15 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["fastapi>=0.115", "uvicorn>=0.30", "watchfiles>=0.24"]
+# ///
 """ygg: create, link, finish, check and compress discourse-graph research trees.
 
 A tree is an Obsidian vault (marked by ygg.json) whose nodes live in tree/, whose
 project notes live in ideas/, and whose relations live in relations.json, in the
 formats of the Discourse Graph and TaskNotes plugins. See DESIGN.md.
-Run `ygg <command> -h` for details. Standard library only.
+Run `ygg <command> -h` for details. uv runs it with the web app's dependencies (see the
+header); every command but `serve` also runs on a bare python3, standard library only.
 """
 import argparse
 import datetime
@@ -1704,6 +1709,19 @@ def cmd_watch(a):
                 lock.unlink()
 
 
+# --- Web app -------------------------------------------------------------------
+
+def cmd_serve(a):
+    root = Path(a.vault or find_vault(os.getcwd())).resolve()
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    try:
+        import ygg_server
+    except ImportError as e:
+        die("`ygg serve` needs its dependencies (%s); run it through uv: scripts/ygg serve, or uv run --script "
+            "scripts/ygg serve" % e)
+    ygg_server.serve(sys.modules[__name__], root, a.port, a.open)
+
+
 # --- CLI -----------------------------------------------------------------------
 
 def add_field_args(p):
@@ -1822,6 +1840,11 @@ def main(argv=None):
                    help="never rewrite a canvas; by default one made by `ygg view` is laid out again when a group "
                    "is folded or unfolded, or notes are added")
     p.set_defaults(func=cmd_watch)
+
+    p = sub.add_parser("serve", help="browse and edit the tree in a local web app")
+    p.add_argument("--port", type=int, default=8765)
+    p.add_argument("--open", action="store_true", help="also open it in the browser")
+    p.set_defaults(func=cmd_serve)
 
     p = sub.add_parser("schema", help="print the Discourse Graph schema export (for manual import)")
     p.add_argument("--out")

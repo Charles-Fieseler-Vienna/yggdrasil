@@ -45,6 +45,8 @@ ygg compress ~/Current_work/repos/Cosyne_2027/research/tree      # prints the ou
 ```
 Then write the compressed nodes with `ygg new`: about one Question per figure, one Claim per one to three panels, each Claim with its own Evidence derived from the tree Source and the Dataset. Keep generalizable results, dead ends and open questions; leave narrow methods details in the project tree. Add the root nodes with `ygg set PROJECT --add-root NOTE`.
 
+**The web app.** `ygg serve` serves a local web app (port 8765) for browsing and editing the tree; its edits run the same CLI commands. It never returns, so don't run it in the foreground yourself; make changes with the CLI, which the open page picks up at once. It is a FastAPI server (`scripts/ygg_server.py`) and a React Flow page (`scripts/web/`); `scripts/ygg` is a uv script, but every other command also runs on plain `python3`.
+
 **Viewing and editing on a canvas.** `ygg view --project control-decomposition` writes `views/control-decomposition.canvas`, a tree with gaps in red, then runs `ygg watch` on it until Ctrl-C; always pass `--no-watch` yourself, since the watch never returns. The user may edit it in Obsidian; `ygg pull NAME` (or a running `ygg watch`) turns new prefixed notes and drawn edges into nodes and relations, and reports anything it cannot. Never edit a canvas to make changes yourself; use `ygg new` and `ygg link`.
 
 **Changing a conclusion.** Never edit a `done` node. Create a new node of the same type with `--link supersedes:OLD`, saying what changed and why, then update the project's Findings.
