@@ -68,6 +68,8 @@ def test_question_evidence_claim(populated, ygg):
     assert out.splitlines()[-1] == "in project test-project"
     _, out = ygg("new", "question", "A loose thought")
     assert "in no project yet" in out
+    _, out = ygg("new", "source", "Head run two", "--run", "repo@abc1234:run.sh", "--status", "done")
+    assert "joins the projects of the Evidence that derives from it" in out and "--add-root" not in out
 
 
 def test_sync_fills_in_what_obsidian_leaves_out(populated, ygg):
@@ -745,11 +747,14 @@ def test_questions_for_the_user_wait_until_answered(populated, ygg):
     assert "Answered since" not in out
     # a decision left to the user in prose is flagged; one asked, or citing a question, is not
     for text in ("Next\n- [ ] read the logs\n- You: accept or reject the new definition",
-                 "decision: no Stage 5, still awaiting user acceptance", "**Decision for you:** redefine it?"):
+                 "decision: no Stage 5, still awaiting user acceptance", "**Decision for you:** redefine it?",
+                 "- Decide which null is fair (needs the user: it is the whole result)",
+                 "The null choice is the open call; I left it for you."):
         _, out = ygg("log", text, "--handoff")
         assert "leaves a decision to the user in prose" in out and "--ask" in out
     for text in ("You were right about the cache; fixed it.", "Still waiting on %s." % qid,
-                 "- Your decision (now a question in the report): Stage 5"):
+                 "- Your decision (now a question in the report): Stage 5",
+                 "This fit needs the user-supplied mask; left it running."):
         _, out = ygg("log", text)
         assert "leaves a decision" not in out
 

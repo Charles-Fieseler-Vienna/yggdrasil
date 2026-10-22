@@ -24,7 +24,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-__version__ = "0.5.8"  # the tool; keep .claude-plugin/plugin.json in step
+__version__ = "0.5.9"  # the tool; keep .claude-plugin/plugin.json in step
 # The tree format. Bump it when a tree written by this ygg could fail the checks of an older one, and
 # teach `ygg init` to upgrade older trees; ygg.json records each tree's format as spec_version.
 SPEC_VERSION = 2  # 2: notes in no project are allowed (a warning, not an error)
@@ -992,8 +992,12 @@ def cmd_new(a):
     n.save()
     finish(vault, [n])
     ps = n.meta.get("projects") or []
-    print("in %s" % ("project%s %s" % ("s" if len(ps) > 1 else "", ", ".join(unlink_name(p) for p in ps)) if ps else
-                     "no project yet: link it to a note of one, or make it a root (`ygg set PROJECT --add-root`)"))
+    if ps:
+        print("in project%s %s" % ("s" if len(ps) > 1 else "", ", ".join(unlink_name(p) for p in ps)))
+    elif n.type in ("source", "dataset"):  # these join through the Evidence derived from them
+        print("in no project yet: it joins the projects of the Evidence that derives from it")
+    else:
+        print("in no project yet: link it to a note of one, or make it a root (`ygg set PROJECT --add-root`)")
 
 
 def cmd_link(a):
@@ -1150,7 +1154,8 @@ ANSWERED_LINE_RE = re.compile(r"^answered ((?:a\d{6}-\d+(?:, )?)+)$", re.M)
 USER_DECISION_RE = re.compile(
     r"^[ \t]*(?:[-*] )?(?:\*\*)?(?:you|user)(?:\*\*)?(?:\b[^\n]{0,15})?:|\byour (?:call|decision|go[ /-]?ahead)\b"
     r"|\b(?:awaiting|waiting (?:on|for)) (?:the )?user\b|\buser'?s (?:call|decision)\b|\bfor you to decide\b|\b(?:decision|question)s? for (?:you|the user)\b"
-    r"|\b(?:accept|approve) or reject\b|\bgo/no-go\b", re.I | re.M)
+    r"|\b(?:accept|approve) or reject\b|\bgo/no-go\b|\bneeds? (?:the )?user\b(?![-'])|\bleft (?:it )?(?:for|to) (?:you|the user)\b",
+    re.I | re.M)
 ISSUE_LINE_RE = re.compile(r"^[ \t]*(?:[-*] \[([ xX])\] )?issue (i\d{6}-\d+)(?: · affects (.*))?$", re.M)
 RESOLVED_LINE_RE = re.compile(r"^resolved ((?:i\d{6}-\d+(?:, )?)+)$", re.M)
 
