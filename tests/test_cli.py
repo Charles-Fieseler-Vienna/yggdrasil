@@ -19,6 +19,22 @@ def test_version_matches_plugin():
     assert version.group(1) in (ROOT / "CHANGELOG.md").read_text()
 
 
+def test_planned_evidence_is_not_a_gap(tree):
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from importlib.machinery import SourceFileLoader
+    y = SourceFileLoader("ygg_flags", str(ROOT / "scripts" / "ygg")).load_module()
+    run("--vault", tree, "new", "question", "Does it hold")
+    run("--vault", tree, "new", "evidence", "Pilot run", "--link", "informs:Does it hold", "--confidence", "low")
+    flags = y.node_flags(y.Vault(tree))
+    assert flags["EVD - Pilot run"] == "open" and flags["QUE - Does it hold"] == "open"
+
+
+def test_vault_goes_before_or_after_the_command(tree):
+    for argv in (("--vault", tree, "check"), ("check", "--vault", tree)):
+        _, out = run(*argv)
+        assert ", 0 errors" in out
+
+
 def test_init_makes_a_valid_tree(tree, ygg):
     for name in ("ygg.json", "relations.json", "NOTEBOOK.md", "ideas/test-project.md", "templates/ygg-claim.md",
                  ".obsidian/plugins/discourse-graphs/data.json"):

@@ -1946,7 +1946,8 @@ def cmd_schema(a):
 
 def node_flags(vault):
     """{stem: flag} for notes that need attention: "gap" (a question nothing addresses, a claim
-    nothing supports, evidence derived from nothing), else "open" (open or in progress), else
+    nothing supports, done evidence derived from nothing; evidence not yet done is planned work, whose run
+    Source comes with its result), else "open" (open or in progress), else
     "weak" (low confidence, refuted, or a failed or ambiguous outcome)."""
     edges = vault.edges()
     answered = {d.stem for rel, s, d in edges if rel in ("addresses", "informs")}
@@ -1958,7 +1959,7 @@ def node_flags(vault):
         if m.get(OUT):
             flags[n.stem] = "out"
         elif ((t == "question" and n.stem not in answered) or (t == "claim" and n.stem not in supported)
-                or (t == "evidence" and n.stem not in derived)):
+                or (t == "evidence" and n.status == "done" and n.stem not in derived)):
             flags[n.stem] = "gap"
         elif n.status in ("open", "in-progress"):
             flags[n.stem] = "open"
@@ -2133,6 +2134,8 @@ def main(argv=None):
     p.add_argument("--out")
     p.set_defaults(func=cmd_schema)
 
+    for sp in sub.choices.values():  # --vault also after the command, where agents tend to put it
+        sp.add_argument("--vault", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     a = ap.parse_args(argv)
     a.func(a)
 

@@ -5,6 +5,11 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
+## Unreleased
+
+- `--vault` is accepted after the command too (`ygg check --vault PATH`).
+- Evidence not yet done without a Source is planned work, flagged open, no longer a gap.
+
 ## 0.3.0 (2026-10-22), tree format 2
 
 - Notes in no project (no root reaches them) are allowed: `ygg check` warns instead of failing, which is why
