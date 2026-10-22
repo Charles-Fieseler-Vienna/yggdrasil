@@ -47,7 +47,7 @@ Paper  Laiz 2025 (Zotero 2Q9B3YAH) -> informs QUE - Do contrastive latents ...
 ```
 
 Write only what they approve. For each:
-- **Questions**: `ygg new question TITLE --body q.md --link "follows-from:..."`, or for a new root,
+- **Questions**: `ygg new question TITLE --body - --link "follows-from:..."`, or for a new root,
   `--link` nothing and then `ygg set PROJECT --add-root NOTE`. A question that connects to nothing yet may
   also stay loose, in no project: `ygg check` only warns, and it can be linked in later.
 - **Out of scope**: in a project's tree, an idea that belongs elsewhere (the main tree, another project)
@@ -64,7 +64,7 @@ Write only what they approve. For each:
 
 In a project's tree, a new project is only out-of-scope questions for now; it is created in the main tree
 after compression. In the main tree, when the ideas gather into something to pursue: create the root questions first, then
-`ygg new project "Project title" --id short-slug --root "QUE - ..." --body p.md`, where `p.md` has a short
+`ygg new project "Project title" --id short-slug --root "QUE - ..." --body -`, whose body (on stdin) has a short
 `## Summary` (the aim, in the user's words) and an empty `## Findings`. Add later roots with
 `ygg set short-slug --add-root NOTE`.
 The project's detailed work later happens in its own repository's tree, started from these questions

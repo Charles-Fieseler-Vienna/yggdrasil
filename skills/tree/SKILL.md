@@ -40,12 +40,12 @@ any unique part of the filename, or for papers `zotero:KEY` / `doi:DOI`. Titles 
 `: # ^ [ ] | \ / * ? " < >`.
 
 ```bash
-ygg new question "Is the head wave driven at the head" --body q.md --link "follows-from:QUE - Parent question"
-ygg new evidence "Head innovations travel down the body" --body evd.md \
+ygg new question "Is the head wave driven at the head" --body - --link "follows-from:QUE - Parent question"
+ygg new evidence "Head innovations travel down the body" --body - \
   --link "derived-from:@Cosyne_2027 research tree" --link "derived-from:DATA - 36-animal cohort" \
   --link "informs:Is the head wave driven" --confidence medium
 ygg done "Head innovations travel" --outcome succeeded
-ygg new claim "Head bending is continuously driven" --body clm.md \
+ygg new claim "Head bending is continuously driven" --body - \
   --link "addresses:Is the head wave driven" --link-from "supports:Head innovations travel" --confidence medium
 ygg link SOURCE REL TARGET          # and ygg unlink
 ygg set NOTE --status in-progress --priority high

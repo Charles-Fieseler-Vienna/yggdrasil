@@ -67,7 +67,7 @@ The scripts are not results, but they say exactly how each figure was made, whic
 - Find the script, notebook or config behind each figure (figure names in code, a README, a `figures/`
   folder, plotting functions). Ask the user when it is not clear; never guess a path.
 - For each, a run Source: `ygg new source "<paper short name> <what it computes>" --run REPO@COMMIT:PATH
-  --status done --link "derived-from:zotero:KEY" --body src.md`, whose Description says what it computes,
+  --status done --link "derived-from:zotero:KEY" --body -`, whose Description says what it computes,
   which figure it makes, and that its outputs were not rerun here. Add data locations it documents with
   `--add-data`. The figure's Evidence then also derives from it (`ygg link "EVD - ..." derived-from "@..."`).
 - One Source per script, shared by the Evidence of every figure it makes. Leave out helpers and utilities.

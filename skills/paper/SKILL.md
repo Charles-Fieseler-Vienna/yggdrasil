@@ -16,7 +16,9 @@ section Papers. All writes go through `ygg` (in a project tree, `ygg --vault PAT
 - Not in the library: find the DOI (OpenAlex, Crossref or arXiv) and add it with `zotero_add_item` by DOI.
   If adding fails, record it in `zotero_pending_adds.md` as the `zotero-research` skill describes, and
   create the Source with the DOI only; add `--zotero` later with `ygg set`.
-- Check the metadata against the DOI. Never invent a key or DOI.
+- Check the metadata against the DOI. Never invent a key or DOI, and don't fill in authors, year or venue
+  from memory: if Zotero lacks them, take them from the DOI record (Crossref, OpenAlex), or leave them out
+  and say so.
 - For more than two or three papers at once, do the lookups in a subagent and have it return title,
   year, first author, item key and DOI for each, so the Zotero output stays out of the main context.
 
@@ -29,10 +31,13 @@ If a Source is found, use it. Otherwise create one, titled with the paper's titl
 cannot hold: `: # ^ [ ] | \ / * ? " < >`; a subtitle after a colon can usually go):
 ```bash
 ygg new source "Self-supervised contrastive learning performs non-linear system identification" \
-  --zotero 2Q9B3YAH --doi 10.48550/arXiv.2410.14673 --status done --body src.md
+  --zotero 2Q9B3YAH --doi 10.48550/arXiv.2410.14673 --status done --body - <<'EOF'
+## Description
+Laiz et al. 2025, preprint. Theory and experiments for dynamics contrastive learning.
+EOF
 ```
-`src.md` holds only `## Description` with one line: first author, year, venue, and what kind of paper it
-is ("Laiz et al. 2025, preprint. Theory and experiments for dynamics contrastive learning."). The
+The body holds only `## Description` with one line: first author, year, venue, and what kind of paper it
+is. The
 abstract, reading notes and highlights stay in Zotero. `ygg new` refuses a second Source with the same key
 or DOI, so a refusal means step 2 missed it: use the existing one.
 
@@ -43,7 +48,10 @@ or opposes. Then one Evidence note per point the project takes from it (usually 
 ```bash
 ygg new evidence "Contrastive learning recovers latent linear dynamics under nonlinear observation" \
   --link "derived-from:zotero:2Q9B3YAH" --link "informs:QUE - ..." --confidence medium --status done \
-  --outcome succeeded --body evd.md
+  --outcome succeeded --body - <<'EOF'
+## Purpose
+...
+EOF
 ```
 - The title is the finding in the paper that matters here, not the paper's title.
 - The body follows the Evidence sections. **Conclusion**: what the paper shows that matters for this

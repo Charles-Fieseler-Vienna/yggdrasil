@@ -11,6 +11,8 @@ tree's `ygg.json`) changes only when a tree written by a new ygg could fail the 
   without `check` calling it changed; changing them is still refused.
 - `ygg log --on NOTE` without `--ask` points to `--for NOTE`, which ties an entry to a note.
 - Tests for `ygg sync` and `ygg schema`.
+- `ygg:paper`: never fill in authors, year or venue from memory. Skill examples pass bodies on stdin
+  (`--body -`) throughout.
 
 ## 0.5.6 (2026-10-23), tree format 2
 
