@@ -24,7 +24,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-__version__ = "0.5.3"  # the tool; keep .claude-plugin/plugin.json in step
+__version__ = "0.5.4"  # the tool; keep .claude-plugin/plugin.json in step
 # The tree format. Bump it when a tree written by this ygg could fail the checks of an older one, and
 # teach `ygg init` to upgrade older trees; ygg.json records each tree's format as spec_version.
 SPEC_VERSION = 2  # 2: notes in no project are allowed (a warning, not an error)
@@ -78,6 +78,14 @@ STATUSES = ["open", "in-progress", "done"]
 PRIORITIES = ["none", "low", "normal", "high"]
 CONFIDENCE = {"claim": ["low", "medium", "high", "refuted"], "evidence": ["low", "medium", "high"]}
 OUTCOMES = ["succeeded", "failed", "ambiguous", "promising-out-of-scope"]
+OUTCOME_ALIASES = {"inconclusive": "ambiguous"}  # the word agents reach for first
+
+
+def outcome_arg(v):
+    v = OUTCOME_ALIASES.get(v, v)
+    if v not in OUTCOMES:
+        raise argparse.ArgumentTypeError("invalid choice: %r (choose from %s)" % (v, ", ".join(OUTCOMES)))
+    return v
 TYPE_FIELDS = {
     "question": set(),
     "claim": {"confidence"},
@@ -1043,6 +1051,8 @@ def cmd_set(a):
 def cmd_done(a):
     vault = open_vault(a)
     n = editable(vault, a.note)
+    if a.outcome and n.type != "evidence":
+        die("--outcome is for Evidence; a %s is done without one: `ygg done %r`" % (n.type, n.stem))
     if a.outcome:
         n.set("outcome", a.outcome)
     n.set("status", "done")
@@ -2563,7 +2573,7 @@ def add_field_args(p):
     p.add_argument("--priority", choices=PRIORITIES)
     p.add_argument("--confidence", choices=sorted(set(CONFIDENCE["claim"])), help="claims and evidence")
     p.add_argument("--scheduled", help="YYYY-MM-DD")
-    p.add_argument("--outcome", choices=OUTCOMES, help="evidence")
+    p.add_argument("--outcome", type=outcome_arg, metavar="{%s}" % ",".join(OUTCOMES), help="evidence")
     p.add_argument("--run", help="repository@commit:path to the run script (sources)")
     p.add_argument("--run-start", dest="run_start")
     p.add_argument("--run-end", dest="run_end")
@@ -2632,7 +2642,8 @@ def main(argv=None):
 
     p = sub.add_parser("done", help="finish and freeze a node")
     p.add_argument("note")
-    p.add_argument("--outcome", choices=OUTCOMES, help="required for evidence")
+    p.add_argument("--outcome", type=outcome_arg, metavar="{%s}" % ",".join(OUTCOMES),
+                   help="required for evidence")
     p.set_defaults(func=cmd_done)
 
     p = sub.add_parser("show", help="print a note with its relations, or a project with its members")

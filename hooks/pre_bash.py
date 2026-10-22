@@ -10,7 +10,7 @@ from pathlib import Path
 
 from session_start import find_trees  # same folder; hooks run with it on sys.path[0]
 
-LOOP_RE = re.compile(r"\b(until|while)\b")
+LOOP_RE = re.compile(r"\b(until|while)\b|\bfor\b[^\n]*?;\s*do\b")
 # pgrep or pkill -0 style polling with -f among its flags, then the pattern (quoted or bare)
 # a ygg command (new, set...) giving --confidence high or refuted
 STRONG_RE = re.compile(r"(^|[;&|(]\s*|\s)(\S*/)?ygg\s[^;&|\n]*--confidence[=\s]+['\"]?(?P<level>high|refuted)\b")

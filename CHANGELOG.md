@@ -5,14 +5,20 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
+## 0.5.4 (2026-10-23), tree format 2
+
+- `ygg show` leaves out the Obsidian plugin's `nodeTypeId` and `nodeInstanceId`, which mean nothing to a reader.
+- The pre-Bash guard also stops `for` loops polling `pgrep -f PATTERN`, which never break for the same reason
+  (a Haiku subagent waited out two such loops in full, trial 22).
+- `--outcome inconclusive` is taken as `ambiguous` (asked for twice, trials 21 and 22), and `ygg done` on a
+  Question or Claim with `--outcome` says that only Evidence has one.
+- `ygg new` says which projects the new note joined, or that it is in none yet (a brainstorm agent believed
+  its linked questions were in no project).
+
 ## 0.5.3 (2026-10-23), tree format 2
 
 - Compression moves out of the `ygg:tree` skill into its own `ygg:compress` skill, and `ygg:handoff` no
   longer repeats the tree skill's notebook rules: about 1.8 KB less for every session to load.
-- `ygg show` leaves out the Obsidian plugin's `nodeTypeId` and `nodeInstanceId`, which mean nothing to a reader.
-- `ygg new` says which projects the new note joined, or that it is in none yet (a brainstorm agent believed
-  its linked questions were in no project).
-
 ## 0.5.2 (2026-10-22), tree format 2
 
 - The search for a tree in subfolders (the CLI's, new in 0.5.1, and the session hook's) happens only inside a

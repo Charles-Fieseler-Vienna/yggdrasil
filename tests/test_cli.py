@@ -100,6 +100,18 @@ def test_done_notes_are_frozen(populated, ygg):
     assert "was done at HEAD and has been changed" in out
 
 
+def test_done_outcomes(populated, ygg, tmp_path):
+    ygg("new", "evidence", "Pilot fit", "--body", body(tmp_path, EVIDENCE), "--link", "informs:Is the head wave driven")
+    ygg("done", "Pilot fit", "--outcome", "inconclusive")  # an alias agents reach for
+    assert "outcome: ambiguous" in (populated / "tree" / "EVD - Pilot fit.md").read_text()
+    _, out = ygg("done", "Pilot fit", "--outcome", "maybe", ok=False)
+    assert "choose from succeeded" in out
+    ygg("new", "question", "Does it travel")
+    _, out = ygg("done", "Does it travel", "--outcome", "succeeded", ok=False)
+    assert "--outcome is for Evidence; a question is done without one" in out
+    assert "status: open" in (populated / "tree" / "QUE - Does it travel.md").read_text()
+
+
 def test_supersede(populated, ygg, tmp_path):
     ygg("new", "claim", "Head bending is driven in bursts", "--body", body(tmp_path, CLAIM),
         "--link", "supersedes:Head bending is continuously", "--link-from", "supports:Innovations travel")

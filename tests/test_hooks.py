@@ -123,6 +123,8 @@ def test_pre_bash_stops_self_matching_wait_loops(tmp_path):
     assert out["permissionDecision"] == "deny"
     assert "ygg watch" in out["permissionDecisionReason"] and "'[n]-matched'" in out["permissionDecisionReason"]
     assert guard(repo, "while pgrep -af 'metric isotropic' >/dev/null; do sleep 5; done")
+    assert guard(repo, "for i in $(seq 1 16); do pgrep -f fit_lagged.py >/dev/null || break; sleep 25; done")
+    assert guard(repo, "for f in *.py; do echo $f; done") is None
     # a bracket class, a loop on kill -0, or a one-off pgrep are fine; so is any loop outside a tree
     assert guard(repo, "until ! pgrep -f '[n]-matched' >/dev/null; do sleep 10; done") is None
     assert guard(repo, "while kill -0 123; do sleep 10; done") is None
