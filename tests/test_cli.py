@@ -76,6 +76,7 @@ def test_sync_fills_in_what_obsidian_leaves_out(populated, ygg):
     stripped = re.sub(r"(?m)^(dateCreated|dateModified|completedDate):.*\n|^projects:\n(  - .*\n)*", "", text)
     assert stripped != text
     q.write_text(stripped, encoding="utf-8")
+    commit(populated, "a done note made in Obsidian, without dates")
     _, out = ygg("sync")
     assert "1 notes synced" in out
     synced = q.read_text(encoding="utf-8")
