@@ -138,6 +138,7 @@ outcome: succeeded                      # Evidence
 | `location`, `n_animals`, `n_recordings` | Dataset | |
 | `legacy_ref` | all | where a backfilled note came from, e.g. `"TREE 1.12"` |
 | `origin` | all | `repository@commit:nodeInstanceId` of the note this one was copied from by `ygg seed` |
+| `out-of-scope` | all | `true` on a note that belongs in another tree (the main tree, another project); it stays until compression moves it out. `ygg new/set --out-of-scope`, `ygg set --in-scope`; the one field that may change on a done note |
 
 TaskNotes should be set to identify tasks by property (`taskIdentificationMethod: property`, `taskPropertyName: nodeTypeId`, empty value), so every node is a task and project notes are not, without a `#task` tag. The pipeline-specific fields of `obsidian_kanban_ai` (`harness`, `agent`, `skills`, `model`, `cli_args`) and its extra statuses are not used.
 
@@ -204,6 +205,8 @@ The walk never goes back up from a member Evidence note to other Claims it suppo
 
 `ygg` writes the result into each node's `projects:` field so TaskNotes boards can group by project. The field is a cache: `check` fails if it differs from the computed membership.
 
+A note no project reaches is **in no project**. That is allowed, since a brainstorm leaves loose questions that connect to nothing yet: `check` warns, `ygg report` lists them (also with `--project`), and the web app shows them whichever project is selected. Linking them in, or making them roots, is for later; so is moving out the ones marked `out-of-scope`, which compression does (see [Compression](#compression)).
+
 `## Findings` summarises the project's current conclusions in prose, citing Claims, e.g. `- The head wave is driven at the head ([[CLM - Head wave is driven at the head]]).` It may be revised freely.
 
 ## Compression
@@ -218,6 +221,7 @@ When a project, or a phase of one, is finished, its detailed tree is **compresse
 - The project's `roots` list the compressed root nodes.
 - A project seeded from the main tree (see [Seeding](#seeding)) is mapped back: the outline marks the seeded notes, and **Seeded from this tree** lists what the project related to them, to be written against the originals.
 - A tree compressed before is compressed incrementally: the new tree Source supersedes the earlier one, and **Since the last compression** lists the notes, relations and notebook entries that are new or changed since its commit, which the outline also marks.
+- Notes the project tree marks `out-of-scope`, and those in no project there, are listed apart: each is moved into the main tree (or noted for another project), dropped, or left. Moving is a new note here, like any compressed note; the project's note stays where it is.
 - Papers are not copied twice. `ygg compress` lists each paper Source of the project tree with the main tree's Source for the same paper (by Zotero key or DOI), if any; compressed Evidence derives from that one. A paper with neither is flagged, to be looked up in Zotero first.
 
 ## Papers
@@ -266,7 +270,7 @@ Each entry is a `## YYYY-MM-DD HH:MM` heading, optionally `— tag` (`decision`,
 
 There is no separate decision log. A decision is first an entry; once it holds, it becomes a Claim (about a method, if it is one) with its Evidence, which may cite the entry's date.
 
-A **handoff** is an entry tagged `handoff`: where things stand, what is running (job IDs, output paths), the next steps as links to nodes, and loose state only the session knows (uncommitted code, scratch paths). Before writing one, the notebook since the last handoff is distilled into the tree: runs, results, decisions and dead ends become nodes, and the next one to three notes get `priority: high`. To catch up, `ygg report --since handoff` lists the high-priority and in-progress notes, the notes changed and the notebook entries since the last handoff. The `ygg:handoff` skill does both. The main tree, being compressed, mostly does without a notebook.
+A **handoff** is an entry tagged `handoff`: where things stand, what is running (job IDs, output paths), the next steps as links to nodes, and loose state only the session knows (uncommitted code, scratch paths). Before writing one, the notebook since the last handoff is distilled into the tree: runs, results, decisions and dead ends become nodes, and the next one to three notes get `priority: high`. To catch up, `ygg report --since handoff` lists the high-priority and in-progress notes, the notes changed and the notebook entries since the last handoff. The `ygg:handoff` skill does both. Every tree has a notebook, the main tree too: brainstorms there end with a `brainstorm` entry of what was set aside and the threads left open.
 
 ### Runs
 
@@ -284,7 +288,7 @@ What can be checked is checked deterministically, on the run's own host only: wh
 
 ## Workflows
 
-There are two ways of working, in two kinds of tree, joined by seeding and compression. They are kept here so that changes to one part of ygg keep both working end to end.
+There are two ways of working, joined by seeding and compression. Both use the same trees, commands and notebook; a "main tree" is only a tree used for brainstorming across projects. They are kept here so that changes to one part of ygg keep both working end to end.
 
 ### Brainstorming
 
@@ -293,7 +297,7 @@ Thinking about what to work on, without code: a conversation that ends in notes 
 - **Input**: an idea, a result from a project, a paper, a talk. Papers come in as Sources linked to Zotero, with Evidence for what they mean here (`ygg:paper`), or broken down whole when they are to be built on (`ygg:digest`).
 - **Output**: open Questions connected to what is already known, especially across projects; links between existing notes; sometimes a new project note with root questions. No runs and no Evidence of our own, so few Claims.
 - **Rhythm**: occasional sessions, each closed with a `brainstorm` notebook entry (what was considered and set aside, and why; the threads left open), `ygg check` and a commit. The notes are the record of what was kept, the notebook of what was not.
-- **Ends** when a question is ready to pursue: it is seeded into a project's tree. A brainstorm inside a project writes only to the project's tree, even ideas that belong elsewhere; they move out at compression, never during the brainstorm.
+- **Ends** when a question is ready to pursue: it is seeded into a project's tree. A brainstorm inside a project writes only to the project's tree, even ideas that belong elsewhere: they may be left in no project and marked `out-of-scope`, and move out at compression, never during the brainstorm.
 
 ### A coding project, in the project's tree
 
@@ -302,7 +306,7 @@ Day-to-day work in a project repository, mostly runs and analyses, with an agent
 1. **Seed** the tree from the main-tree question (`ygg seed`), and **expand** it into sub-questions and planned runs, open Evidence saying what to run and what would answer it (`ygg:seed`).
 2. **Work** in sessions: runs (below), notebook entries for decisions, dead ends and surprises as they happen (`ygg log`), and nodes only once something settles. Most of the notebook never becomes nodes. Commits are frequent.
 3. **Hand off** at the end of each session and catch up at the start of the next (`ygg:handoff`): the notebook since the last handoff is distilled into nodes, loose runs are summed up, and the next steps get `priority: high`.
-4. **Compress** at the end of a phase (`ygg compress`, in the main tree): the generalizable results, dead ends and open questions go back up, written against the notes the project was seeded from. A later compression shows only what changed since. New questions from it are brainstorming again.
+4. **Compress** at the end of a phase (`ygg compress`, in the main tree): the generalizable results, dead ends and open questions go back up, written against the notes the project was seeded from, along with the notes marked out of scope there. A later compression shows only what changed since. New questions from it are brainstorming again.
 
 ### The life of a run
 
@@ -329,13 +333,13 @@ It is a [uv](https://docs.astral.sh/uv/) script: its first lines declare Python 
 | `ygg set NOTE [...]` | Changes fields or the body of an editable node, or a project's roots. |
 | `ygg done NOTE [--outcome X]` | Finishes and freezes a node. |
 | `ygg show NOTE` | Prints a note with its relations (and a claim's datasets), or a project with its members. |
-| `ygg report [--project P] [--since DATE\|handoff] [--all]` | Lists high-priority and in-progress work, open nodes, unanswered questions, low-confidence claims and orphans; with `--since`, also the notes changed and the notebook entries since then. Kept short: empty groups are left out and each lists its first 8 notes (`--all` for every one); runs get one summary line and a **Needs action** group (see [Runs](#runs)). |
+| `ygg report [--project P] [--since DATE\|handoff] [--all]` | Lists high-priority and in-progress work, open nodes, unanswered questions, low-confidence claims, notes in no project, and notes out of scope (apart from the work lists); with `--since`, also the notes changed and the notebook entries since then. Kept short: empty groups are left out and each lists its first 8 notes (`--all` for every one); runs get one summary line and a **Needs action** group (see [Runs](#runs)). |
 | `ygg log [TEXT] [--tag WORD] [--handoff] [--body FILE] [--pid N] [--job ID] [--log PATH] [--for NOTE]` | Appends a dated entry to the notebook (see [Notebook](#notebook)); with `--pid` or `--job`, logs a run and prints its id (see [Runs](#runs)). |
 | `ygg runs [NOTE] [--all]` | Lists the runs still running or waiting to be looked at, with their logs. |
 | `ygg drop ID... [-m WHY] [--kill]` | Gives runs up, so nothing flags them again. |
 | `ygg watch [ID\|NOTE...] [--first] [--timeout H]` | Waits for runs to end, printing a line per end, failure or quiet log. |
 | `ygg sync` | Regenerates `projects:` and fills in TaskNotes dates missing from notes made in Obsidian. |
-| `ygg compress PATH [--dry-run]` | Outlines a project tree and records it as a Source at its commit; refuses uncommitted trees. Maps seeded notes back and, the second time, lists what changed. |
+| `ygg compress PATH [--dry-run]` | Outlines a project tree and records it as a Source at its commit; refuses uncommitted trees. Maps seeded notes back, lists notes out of scope or in no project there and, the second time, lists what changed. |
 | `ygg seed NOTE... --from TREE [--project P] [--depth N] [--dry-run]` | Copies notes and everything under them from another tree into this one (see [Seeding](#seeding)). |
 | `ygg serve [--port N] [--open]` | Serves a local web app for browsing and editing the tree (see [Web app](#web-app)). |
 | `ygg check` | Validates everything; exits 1 on any error. |
@@ -352,14 +356,14 @@ Notes are named by filename, by the content after the type prefix, by `nodeInsta
 - `derived from`, `follows from` and `supersedes` contain no cycles;
 - `done` Evidence has an `outcome` and non-empty Conclusion and Caveats; `done` Questions and Claims have their main section;
 - every Claim is supported by at least one Evidence note;
-- every node is reachable from some project's roots, and `projects:` matches the computed membership;
+- `projects:` matches the computed membership (a note in no project is a warning, not an error);
 - `done` notes are unchanged since `HEAD` (bar `projects:` and `dateModified`), and relations touching them were not removed;
 - `run`, `tree` and `figures` are immutable references; only `.md` files are in `tree/` and `ideas/`;
 - the DG settings hold the ygg types and no sync password, and `ygg.json` is in the tool's tree format.
 
 ### Versions
 
-The tool version (`ygg --version`, also in `.claude-plugin/plugin.json`) and the tree format (`spec_version` in `ygg.json`) are separate. The format changes only when a tree written by a new ygg could fail an older one's checks; `ygg init` upgrades a tree in place, and every command warns about a tree in another format (an older one: run `ygg init`; a newer one: update ygg). New optional fields that older versions ignore, like `origin`, do not change the format. `CHANGELOG.md` records both.
+The tool version (`ygg --version`, also in `.claude-plugin/plugin.json`) and the tree format (`spec_version` in `ygg.json`) are separate. The format changes only when a tree written by a new ygg could fail an older one's checks; `ygg init` upgrades a tree in place, and every command warns about a tree in another format (an older one: run `ygg init`; a newer one: update ygg). New optional fields that older versions ignore, like `origin` and `out-of-scope`, do not change the format. Format 2 (ygg 0.3.0) allows notes in no project, which format 1 rejected. `CHANGELOG.md` records both.
 
 ### Web app
 
@@ -368,7 +372,7 @@ The tool version (`ygg --version`, also in `.claude-plugin/plugin.json`) and the
 - The server is a FastAPI app in `scripts/ygg_server.py`, run by uvicorn. It rebuilds the graph from the files on every read, keeping no cache.
 - The page is in `scripts/web/`: React with [React Flow](https://reactflow.dev) for the graph. Each module is small: `graph.js` (what is shown; pure functions), `layout.js` (positions), `animate.js` (moving between layouts), `api.js`, `note.js` (the card), `edges.js` (the relation curves), `toolbar.js`, `panel.js`, `dialogs.js` and `main.js` (state). There is no build step. The libraries load from esm.sh at pinned versions through an import map, and `htm` stands in for JSX.
 
-The tree is drawn left to right parent → child: questions lead to their follow-ups, claims and informing evidence, claims to their evidence, evidence to its sources and datasets. Arrowheads mark each relation's real destination. Node colour is the type; the border marks gaps (red), open or in-progress notes (dashed blue) and weak ones (double yellow).
+The tree is drawn left to right parent → child: questions lead to their follow-ups, claims and informing evidence, claims to their evidence, evidence to its sources and datasets. Arrowheads mark each relation's real destination. Node colour is the type; the border marks gaps (red), open or in-progress notes (dashed blue), weak ones (double yellow) and out-of-scope ones (dotted grey, faded). Notes in no project are shown whichever project is selected.
 
 Folding is per node. Ctrl-click (Cmd-click on a Mac) a node to fold or unfold what is under it; a node is shown if it is a root or under an unfolded shown node, so a node shared by several parents appears as soon as any of them is unfolded. A folded node shows how many notes and gaps it hides; hidden gaps also tint it red. By default only the top questions are unfolded.
 
@@ -376,7 +380,7 @@ The layout is a tidy tree, one column per level, with each node's children in a 
 
 Alt-click a node (or **Focus** in the side panel) to make it the view's only root: the view shows just it and what is under it, unfolded one level. A breadcrumb above the graph shows the trail of notes focused from the top, with **↑ Up** (focus on the note above), **Reset** (the whole tree, folded to the default) and links to each note on the trail. Alt-clicking a note under the focus extends the trail; anything else starts a new one from its shortest path to a top root.
 
-The **Show** menu filters the notes themselves: **In progress**, **Not done**, **Gaps**, **Weak** (low or refuted confidence, a failed or ambiguous outcome), **Changed since…** a date, or **Field…**, any frontmatter field holding a value (or any value). The matches are shown with every note above them up to the roots, faded, for context, and nothing else; folding is set aside, and ctrl-click shows or hides a note's other children. With nothing selected, the side panel lists the matches, most recently changed first. This is the catch-up view for a project: pick the project, then In progress or Not done.
+The **Show** menu filters the notes themselves: **In progress**, **Not done**, **Gaps**, **Out of scope**, **Weak** (low or refuted confidence, a failed or ambiguous outcome), **Changed since…** a date, or **Field…**, any frontmatter field holding a value (or any value). The matches are shown with every note above them up to the roots, faded, for context, and nothing else; folding is set aside, and ctrl-click shows or hides a note's other children. With nothing selected, the side panel lists the matches, most recently changed first. This is the catch-up view for a project: pick the project, then In progress or Not done.
 
 Fold state, focus trail, filters and the project choice are kept in the browser per vault. The toolbar filters by project and type, finds a note (unfolding a path down to it), and folds to the default or unfolds everything.
 

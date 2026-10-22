@@ -24,10 +24,10 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-__version__ = "0.2.0"  # the tool; keep .claude-plugin/plugin.json in step
+__version__ = "0.3.0"  # the tool; keep .claude-plugin/plugin.json in step
 # The tree format. Bump it when a tree written by this ygg could fail the checks of an older one, and
 # teach `ygg init` to upgrade older trees; ygg.json records each tree's format as spec_version.
-SPEC_VERSION = 1
+SPEC_VERSION = 2  # 2: notes in no project are allowed (a warning, not an error)
 
 # --- Schema --------------------------------------------------------------------
 
@@ -88,7 +88,8 @@ TYPE_FIELDS = {
 OWN_FIELDS = set().union(*TYPE_FIELDS.values())
 LIST_FIELDS = {"data", "figures", "projects"}
 # Fields that may change on a done note: generated, or bumped by the plugins.
-UNFROZEN_FIELDS = {"projects", "dateModified"}
+UNFROZEN_FIELDS = {"projects", "dateModified", "out-of-scope"}
+OUT = "out-of-scope"  # true on a note that belongs in another tree; it moves out at compression
 
 DG_PLUGIN = "discourse-graphs"
 TN_PLUGIN = "tasknotes"
@@ -616,8 +617,6 @@ def graph_errors(vault):
     for n in vault.nodes.values():
         if n.type == "claim" and n.stem not in supported:
             errs.append("[[%s]]: a claim needs at least one supporting evidence note" % n.stem)
-        if n.stem not in members:
-            errs.append("[[%s]]: not reachable from any project's roots" % n.stem)
         want = [wikilink(p) for p in members.get(n.stem, [])]
         if (n.meta.get("projects") or []) != want:
             errs.append("[[%s]]: projects field is stale; run `ygg sync`" % n.stem)
@@ -845,6 +844,10 @@ def apply_fields(n, a):
             v = normalize_paper_id(k, v) if k == "zotero" else DOI_PREFIX_RE.sub("", v.strip())
         if v:
             n.set(k, v)
+    if getattr(a, "out_of_scope", False):
+        n.set(OUT, True)
+    if getattr(a, "in_scope", False):
+        n.set(OUT, None)
     for k in ("n_animals", "n_recordings"):
         v = getattr(a, k, None)
         if v is not None:
@@ -979,7 +982,11 @@ def cmd_unlink(a):
 
 def cmd_set(a):
     vault = open_vault(a)
-    n = editable(vault, a.note, ("node", "project"))
+    n = vault.resolve(a.note, ("node", "project"))
+    scope_only = (a.out_of_scope or a.in_scope) and not any(
+        v for k, v in vars(a).items() if k not in ("note", "out_of_scope", "in_scope", "func", "cmd", "vault"))
+    if not scope_only:
+        n = editable(vault, a.note, ("node", "project"))
     if n.type == "project":
         roots = [unlink_name(r) for r in n.meta.get("roots") or []]
         roots += [vault.resolve(r).stem for r in a.add_root if vault.resolve(r).stem not in roots]
@@ -1017,6 +1024,8 @@ def describe(n):
     for k in ("confidence", "outcome"):
         if n.meta.get(k):
             bits.append(str(n.meta[k]))
+    if n.meta.get(OUT):
+        bits.append("out of scope")
     return "[[%s]] (%s)" % (n.stem, ", ".join(bits))
 
 
@@ -1079,6 +1088,21 @@ def notebook_entries(root):
 def last_handoff(root):
     hand = [e for e in notebook_entries(root) if "handoff" in e["tag"].lower()]
     return hand[-1]["when"] if hand else None
+
+
+def loose_notes(vault, members=None):
+    """Notes no project's roots reach: allowed (a brainstorm may leave them), but worth seeing."""
+    members = vault.membership() if members is None else members
+    return sorted(n.stem for n in vault.nodes.values() if n.stem not in members)
+
+
+def graph_warnings(vault):
+    loose = loose_notes(vault)
+    if not loose:
+        return []
+    return ["%d note%s in no project (add a root with `ygg set PROJECT --add-root`, or link them): %s" % (
+        len(loose), "" if len(loose) == 1 else "s", ", ".join("[[%s]]" % s for s in loose[:LIST_CAP])
+        + (" and %d more" % (len(loose) - LIST_CAP) if len(loose) > LIST_CAP else ""))]
 
 
 def notebook_warnings(vault):
@@ -1515,27 +1539,29 @@ def cmd_report(a):
     elif since and not DATETIME_RE.match(since.replace(" ", "T")):
         die("--since must be a date (YYYY-MM-DD) or 'handoff'")
     changed = lambda n: str(n.meta.get("dateModified") or "")[:16].replace("T", " ") >= since
+    loose = [n for n in sorted(vault.nodes.values(), key=lambda n: n.stem) if n.stem not in members]
+    out = [n for n in nodes + [n for n in loose if n not in nodes] if n.meta.get(OUT)]
+    here = [n for n in nodes if not n.meta.get(OUT)]  # the work of this tree
     groups = [
-        ("High priority, not done", [n for n in nodes if n.meta.get("priority") == "high" and n.status != "done"]),
-        ("In progress", [n for n in nodes if n.status == "in-progress"]),
-        ("Open", [n for n in nodes if n.status == "open"]),
-        ("Questions nothing addresses or informs yet", [n for n in nodes if n.type == "question"
+        ("High priority, not done", [n for n in here if n.meta.get("priority") == "high" and n.status != "done"]),
+        ("In progress", [n for n in here if n.status == "in-progress"]),
+        ("Open", [n for n in here if n.status == "open"]),
+        ("Questions nothing addresses or informs yet", [n for n in here if n.type == "question"
                                                        and n.stem not in answered]),
-        ("Claims at low confidence", [n for n in nodes if n.type == "claim" and n.meta.get("confidence") == "low"]),
-        ("Not in any project", [n for n in nodes if n.stem not in members]),
+        ("Claims at low confidence", [n for n in here if n.type == "claim" and n.meta.get("confidence") == "low"]),
+        ("In no project", [n for n in loose if not n.meta.get(OUT)]),
+        ("Out of scope here, to move out at compression", out),
     ]
     if since:
         groups.append(("Changed since %s" % since, sorted((n for n in nodes if changed(n)),
                                                           key=lambda n: str(n.meta.get("dateModified")))))
-    if a.project:
-        groups = [g for g in groups if g[0] != "Not in any project"]
     cap = None if a.all else LIST_CAP
     for title, group in groups:
         if not group:
             continue
         print("## %s (%d)" % (title, len(group)))
         for n in group[:cap]:
-            print("- %s%s" % (describe(n), "" if a.project else
+            print("- %s%s" % (describe(n), "" if a.project or len(vault.projects) < 2 else
                               " [%s]" % (", ".join(members.get(n.stem, [])) or "no project")))
         if cap and len(group) > cap:
             print("- … and %d more (`--all`)" % (len(group) - cap))
@@ -1583,7 +1609,7 @@ def cmd_check(a):
     errors = all_errors(vault)
     for e in errors:
         print(e)
-    for w in notebook_warnings(vault):
+    for w in graph_warnings(vault) + notebook_warnings(vault):
         print("warning: " + w)
     print("%d nodes, %d projects, %d relations, %d errors" % (
         len(vault.nodes), len(vault.projects), len(vault.relations), len(errors)))
@@ -1659,6 +1685,7 @@ def cmd_compress(a):
         for stem, how in (changes or {}).get("marks", {}).items():
             marks[stem] = ("(%s since the last compression) " % how + marks.get(stem, "")).strip()
         outline(project, marks)
+        scope_report(project)
         paper_matches(project, target)
         seeded_report(project, target)
         if changes:
@@ -1685,6 +1712,23 @@ def cmd_compress(a):
     print("\nNext: create the compressed Questions, Claims and Evidence with `ygg new`, deriving the "
           "Evidence from this Source (and its Dataset) with --link derived-from:..., then add the roots "
           "to the project note in ideas/.")
+
+
+def scope_report(project):
+    """Notes the project's tree holds that are not under its roots, or marked as belonging elsewhere."""
+    members = project.membership()
+    out = sorted(n.stem for n in project.nodes.values() if n.meta.get(OUT))
+    loose = [s for s in loose_notes(project, members) if s not in out]
+    for title, group, hint in (
+            ("Out of scope there", out, "marked as belonging elsewhere: candidates to move into this tree "
+             "or another project, whatever else is compressed"),
+            ("In no project there", loose, "not under any root, often left by a brainstorm: compress, "
+             "move or leave each")):
+        if group:
+            print("# %s (%d): %s\n" % (title, len(group), hint))
+            for s in group:
+                print("- %s" % describe(project.nodes[s]))
+            print()
 
 
 def seeded_marks(project, target):
@@ -1911,7 +1955,9 @@ def node_flags(vault):
     flags = {}
     for n in vault.nodes.values():
         t, m = n.type, n.meta
-        if ((t == "question" and n.stem not in answered) or (t == "claim" and n.stem not in supported)
+        if m.get(OUT):
+            flags[n.stem] = "out"
+        elif ((t == "question" and n.stem not in answered) or (t == "claim" and n.stem not in supported)
                 or (t == "evidence" and n.stem not in derived)):
             flags[n.stem] = "gap"
         elif n.status in ("open", "in-progress"):
@@ -1955,6 +2001,8 @@ def add_field_args(p):
     p.add_argument("--n-animals", dest="n_animals", type=int, help="datasets")
     p.add_argument("--n-recordings", dest="n_recordings", type=int, help="datasets")
     p.add_argument("--legacy-ref", dest="legacy_ref", help="where a backfilled note came from")
+    p.add_argument("--out-of-scope", dest="out_of_scope", action="store_true",
+                   help="the note belongs in another tree; it moves out at compression (allowed on done notes)")
     p.add_argument("--body", help="markdown file with the body sections, or - for stdin")
 
 
@@ -2002,6 +2050,7 @@ def main(argv=None):
     p.add_argument("--add-root", dest="add_root", action="append", default=[], help="projects")
     p.add_argument("--remove-root", dest="remove_root", action="append", default=[], help="projects")
     add_field_args(p)
+    p.add_argument("--in-scope", dest="in_scope", action="store_true", help="undo --out-of-scope")
     p.set_defaults(func=cmd_set)
 
     p = sub.add_parser("done", help="finish and freeze a node")

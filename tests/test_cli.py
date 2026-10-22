@@ -314,9 +314,34 @@ def test_compress_maps_seeds_and_is_incremental(populated, project, tmp_path):
     assert "(new since the last compression)" in out
     _, out = run("--vault", populated, "show", "@proj research tree")
     assert re.search(r"supersedes \[\[@proj research tree \w+\]\]|is superseded by", out)
-    # the new Sources are orphans until compressed nodes derive from them; nothing else is wrong
-    _, out = run("--vault", populated, "check", ok=False)
-    assert out.count("not reachable") == 2 and "2 errors" in out
+    # the new Sources are in no project until compressed nodes derive from them; nothing else is wrong
+    _, out = run("--vault", populated, "check")
+    assert "2 notes in no project" in out and ", 0 errors" in out
+
+
+def test_loose_and_out_of_scope_notes(populated, project, tmp_path):
+    seed(project, "Is the head wave", "--from", populated)
+    pygg = lambda *a, ok=True: run("--vault", project, *a, ok=ok)
+    pygg("new", "question", "Do other worms steer the same way")          # a brainstorm left it loose
+    pygg("new", "question", "Is the same true of fly larvae", "--link", "follows-from:Head bending",
+         "--out-of-scope")
+    pygg("set", "Head bending is continuously driven", "--out-of-scope")   # done, yet allowed
+    _, out = pygg("set", "Head bending is continuously driven", "--confidence", "low", ok=False)
+    assert "frozen" in out
+    _, out = pygg("check")
+    assert "1 note in no project" in out and "Do other worms" in out and ", 0 errors" in out
+    proj = next(p.stem for p in (project / "ideas").glob("*.md"))
+    _, out = pygg("report", "--project", proj)
+    work, scope = out.split("## Out of scope here")
+    assert "## In no project (1)" in work and "Do other worms" in work
+    assert "fly larvae" not in work and "fly larvae" in scope and "out of scope)" in scope
+    commit(project.parent.parent, "brainstorm")
+    _, out = run("--vault", populated, "compress", project)
+    out_part = out.split("# Out of scope there (2)")[1].split("# In no project there (1)")
+    assert "fly larvae" in out_part[0] and "Head bending" in out_part[0] and "Do other worms" in out_part[1]
+    pygg("set", "fly larvae", "--in-scope")
+    _, out = pygg("show", "fly larvae")
+    assert "out-of-scope" not in out
 
 
 def test_compress_refuses_uncommitted(populated, project):
@@ -329,6 +354,7 @@ def test_compress_refuses_uncommitted(populated, project):
 def test_main_tree_still_checks(tmp_path):
     clone = tmp_path / "main"
     subprocess.run(["git", "clone", "-q", str(MAIN_TREE), str(clone)], check=True)
+    run("init", clone)  # upgrades it, if it is in an older format
     _, out = run("--vault", clone, "check")
     assert ", 0 errors" in out
 

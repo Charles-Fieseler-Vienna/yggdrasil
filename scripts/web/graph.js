@@ -17,7 +17,7 @@ export function indexGraph(g) {
 // The nodes passing the filters, their layout parents and children, and the top roots.
 export function structure(G, hiddenTypes, project) {
   const inSet = new Set(G.nodes.filter((n) => !hiddenTypes.has(n.type) &&
-    (!project || n.projects.includes(project))).map((n) => n.id));
+    (!project || n.projects.includes(project) || !n.projects.length)).map((n) => n.id));  // and notes in no project
   const parents = new Map(), children = new Map();
   for (const id of inSet) { parents.set(id, []); children.set(id, []); }
   for (const e of G.edges) {
@@ -83,6 +83,7 @@ export const FILTERS = {
   "in-progress": { label: "In progress", test: (n) => n.status === "in-progress" },
   "not-done": { label: "Not done", test: (n) => n.status !== "done" },
   gap: { label: "Gaps", test: (n) => n.flag === "gap" },
+  out: { label: "Out of scope", test: (n) => n.flag === "out" },
   weak: { label: "Weak", test: (n) => ["low", "refuted"].includes(n.confidence) || ["failed", "ambiguous"].includes(n.outcome) },
   changed: { label: "Changed since…", test: (n, f) => !f.since || String(n.meta.dateModified || "").slice(0, 10) >= f.since },
   field: { label: "Field…", test: (n, f) => fieldMatches(n, f.key, f.value) },

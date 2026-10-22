@@ -84,6 +84,7 @@ main { flex: 1; display: flex; min-height: 0; }
 .flag.gap { border-color: var(--gap); }
 .flag.open { border-color: var(--open); border-style: dashed; }
 .flag.weak { border-color: var(--weak); border-style: double; border-width: 3px; }
+.flag.out { border-color: var(--muted); border-style: dotted; }
 .breadcrumb {
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
   padding: 5px 12px; border-bottom: 1px solid var(--line); font-size: 13px;
@@ -111,6 +112,7 @@ main { flex: 1; display: flex; min-height: 0; }
 .note.flag-gap { border: 3px solid var(--gap); }
 .note.flag-open { border: 2px dashed var(--open); }
 .note.flag-weak { border: 4px double var(--weak); }
+.note.flag-out { border: 2px dotted var(--muted); opacity: 0.7; }
 /* folded: a second card peeks out behind */
 .note.folded { --stack: 5px 5px 0 -1.5px var(--card), 5px 5px 0 0 color-mix(in srgb, var(--type) 70%, transparent); }
 .note.hidden-gaps { --ring: 0 0 0 7px color-mix(in srgb, var(--gap) 22%, transparent); }

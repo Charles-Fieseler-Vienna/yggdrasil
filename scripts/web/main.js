@@ -179,8 +179,7 @@ function App() {
     const g = await load();
     if (created) {
       const n = g.byId.get(created);
-      setToast({ text: "Created " + (n ? n.stem : "the note") + (n && !n.projects.length ? "\nIt is not in any project yet." : ""),
-                 error: n && !n.projects.length });
+      setToast({ text: "Created " + (n ? n.stem : "the note") + (n && !n.projects.length ? "\nIt is in no project yet." : "") });
       if (n) reveal(n.id, g, unfold ? [unfold] : []);
     } else if (message) {
       setToast({ text: message });

@@ -5,8 +5,16 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
-## Unreleased
+## 0.3.0 (2026-10-22), tree format 2
 
+- Notes in no project (no root reaches them) are allowed: `ygg check` warns instead of failing, which is why
+  the tree format is now 2 (an older ygg would fail such a tree). `ygg init` upgrades a tree. `ygg report` lists
+  them as "In no project", also with `--project`, and the web app shows them with any project selected.
+- `out-of-scope: true` (`ygg new/set --out-of-scope`, `--in-scope` to undo) marks a note that belongs in another
+  tree; it may be set on done notes. Such notes leave the report's work lists for their own group, get their
+  own flag and Show filter in the web app, and `ygg compress` lists them, with the notes in no project, as
+  candidates to move out.
+- The web app's note panel shows `priority`, `origin` and `out-of-scope`.
 - Every tree keeps a notebook, the main tree too ("main" is how a tree is used, not a kind of tree): run
   `ygg init` in an older tree to add it. `ygg:brainstorm` ends a session with a `brainstorm` entry of the ideas
   set aside and the threads left open, and points to `ygg:seed` for a new project.

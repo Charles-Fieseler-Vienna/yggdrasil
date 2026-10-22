@@ -63,7 +63,7 @@ export function Toolbar({ G, project, setProject, hiddenTypes, toggleType, filte
       <button onClick=${onFit}>Fit</button>
       <button onClick=${onNewRoot} title="A new question that is a root of a project">New root question</button>
       <span className="legend">
-        <span className="flag gap">gap</span><span className="flag open">open</span><span className="flag weak">weak</span>
+        <span className="flag gap">gap</span><span className="flag open">open</span><span className="flag weak">weak</span><span className="flag out">out of scope</span>
         <span className="hint">ctrl-click folds · alt-click focuses</span>
       </span>
     </header>`;

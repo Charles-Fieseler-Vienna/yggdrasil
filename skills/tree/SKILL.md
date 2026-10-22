@@ -27,7 +27,7 @@ absolute cluster path.
 
 ## Before writing
 
-1. `ygg report` (with `--project P`, `--since handoff`) for work in progress, priorities, open nodes, orphans.
+1. `ygg report` (with `--project P`, `--since handoff`) for work in progress, priorities, open nodes, notes in no project, notes out of scope.
 2. Read the relevant project notes in `ideas/`; `ygg show NOTE` reads a note with its relations.
 3. Reuse existing nodes; relate to them rather than restating them.
 
@@ -82,7 +82,9 @@ open questions; leave narrow methods in the project tree. Add roots with `ygg se
 The outline's **Papers** list says which papers already have a Source in the main tree (derive from that one;
 never make a second) and which lack a Zotero key or DOI. **Seeded from this tree** lists the notes copied
 from the main tree with what the project added under them: write those against the original notes, not new
-copies. On a second compression of the same tree, **Since the last compression** lists only the new and
+copies. **Out of scope there** and **In no project there** list notes the project left for elsewhere,
+often from brainstorms: with the user, move each into the main tree as a new note (the project's stays), or
+leave it. On a second compression of the same tree, **Since the last compression** lists only the new and
 changed notes, relations and notebook entries, and the outline marks them.
 
 **The notebook.** While working, append decisions, dead ends and surprises as they happen:

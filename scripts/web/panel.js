@@ -6,7 +6,8 @@ import { api } from "./api.js";
 import { html } from "./html.js";
 
 const WIKILINK = /\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]*))?\]\]/g;
-const FLAG_TEXT = { gap: "gap: needs work", open: "open or in progress", weak: "weak" };
+const FLAG_TEXT = { gap: "gap: needs work", open: "open or in progress", weak: "weak",
+                    out: "out of scope: moves out at compression" };
 
 function escapeHtml(s) {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -55,9 +56,9 @@ export function Panel({ G, id, matches, onReveal, onFocus, onAction, onUnlink })
   }
   const spec = G.schema.types[n.type];
   const done = n.status === "done";
-  const fields = [["status", n.status], ["confidence", n.confidence], ["outcome", n.outcome],
+  const fields = [["status", n.status], ["priority", n.meta.priority], ["confidence", n.confidence], ["outcome", n.outcome],
                   ["flag", FLAG_TEXT[n.flag]], ["projects", n.projects.join(", ") || "none"],
-                  ...["zotero", "doi", "citekey", "run", "tree", "location"].map((k) => [k, n.meta[k]]), ["file", n.file]];
+                  ...["zotero", "doi", "citekey", "run", "tree", "location", "origin"].map((k) => [k, n.meta[k]]), ["file", n.file]];
   const relations = G.edges.filter((e) => e.source === n.id || e.target === n.id);
   const obsidian = "obsidian://open?vault=" + encodeURIComponent(G.vault) + "&file=" + encodeURIComponent(n.file);
   const clickBody = (e) => {

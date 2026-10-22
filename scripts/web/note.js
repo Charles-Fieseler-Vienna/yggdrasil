@@ -1,4 +1,4 @@
-// A note's card on the graph. Fill and border come from its type; the flag (gap, open, weak)
+// A note's card on the graph. Fill and border come from its type; the flag (gap, open, weak, out)
 // restyles the border; a folded card looks stacked and says what it hides. Under a filter, the
 // notes shown only as context for a match are faded.
 import { Handle, Position } from "@xyflow/react";
