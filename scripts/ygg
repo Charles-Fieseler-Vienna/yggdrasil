@@ -24,7 +24,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-__version__ = "0.5.9"  # the tool; keep .claude-plugin/plugin.json in step
+__version__ = "0.5.10"  # the tool; keep .claude-plugin/plugin.json in step
 # The tree format. Bump it when a tree written by this ygg could fail the checks of an older one, and
 # teach `ygg init` to upgrade older trees; ygg.json records each tree's format as spec_version.
 SPEC_VERSION = 2  # 2: notes in no project are allowed (a warning, not an error)
@@ -827,13 +827,14 @@ def default_body(t):
     return "\n".join("## %s\n" % s for s in TYPES[t]["sections"])
 
 
-def check_note(n, vault):
+def check_note(n, vault, creating=False):
     errs = note_errors(n, vault)
     for o in vault.nodes.values():
         for kind, key in sorted(paper_ids(n) & paper_ids(o) if o is not n else ()):
             errs.append("[[%s]] already has %s %s; link to it instead" % (o.stem, kind, key))
     if errs:
-        die("%s:\n  " % vault.rel(n.path) + "\n  ".join(errs))
+        die("%s:\n  " % vault.rel(n.path) + "\n  ".join(errs)
+            + ("\nNothing was written: fix the command and run `ygg new` again." if creating else ""))
 
 
 def editable(vault, name, kinds=("node",)):
@@ -953,6 +954,9 @@ def cmd_init(a):
 
 def cmd_new(a):
     vault = open_vault(a)
+    if getattr(a, "project_given", None):
+        die("a note's projects follow from its links: link it to a note of the project (e.g. --link "
+            "\"follows-from:QUE - ...\"), or make it a root afterwards: `ygg set PROJECT --add-root NOTE`")
     if a.type == "project":
         stem = a.id or slugify(a.title)
         if stem in vault.projects:
@@ -962,7 +966,7 @@ def cmd_new(a):
         body = read_body(a.body) if a.body else "## Summary\n\n## Findings\n"
         p = Note(vault.root / "ideas" / (stem + ".md"), meta, {}, body)
         vault.projects[stem] = p
-        check_note(p, vault)
+        check_note(p, vault, creating=True)
         p.save()
         finish(vault, [p])
         return
@@ -986,7 +990,7 @@ def cmd_new(a):
     links = [(r, n, vault.resolve(t)) for r, t in (parse_rel(s, "--link") for s in a.link)]
     links += [(r, vault.resolve(t), n) for r, t in (parse_rel(s, "--link-from") for s in a.link_from)]
     vault.nodes[stem] = n
-    check_note(n, vault)
+    check_note(n, vault, creating=True)
     for rel, s, d in links:
         add_relation(vault, rel, s, d)
     n.save()
@@ -1153,7 +1157,7 @@ ANSWERED_LINE_RE = re.compile(r"^answered ((?:a\d{6}-\d+(?:, )?)+)$", re.M)
 # which belongs in a question instead, so it waits where the user looks and is not lost between handoffs.
 USER_DECISION_RE = re.compile(
     r"^[ \t]*(?:[-*] )?(?:\*\*)?(?:you|user)(?:\*\*)?(?:\b[^\n]{0,15})?:|\byour (?:call|decision|go[ /-]?ahead)\b"
-    r"|\b(?:awaiting|waiting (?:on|for)) (?:the )?user\b|\buser'?s (?:call|decision)\b|\bfor you to decide\b|\b(?:decision|question)s? for (?:you|the user)\b"
+    r"|\b(?:awaiting|waiting (?:on|for)) (?:the )?user\b|\buser(?:'?s)? (?:call|decision)\b|\bfor you to decide\b|\b(?:decision|question)s? for (?:you|the user)\b"
     r"|\b(?:accept|approve) or reject\b|\bgo/no-go\b|\bneeds? (?:the )?user\b(?![-'])|\bleft (?:it )?(?:for|to) (?:you|the user)\b",
     re.I | re.M)
 ISSUE_LINE_RE = re.compile(r"^[ \t]*(?:[-*] \[([ xX])\] )?issue (i\d{6}-\d+)(?: · affects (.*))?$", re.M)
@@ -2629,6 +2633,7 @@ def main(argv=None):
     p.add_argument("--link-from", dest="link_from", action="append", default=[],
                    help="REL:NOTE, NOTE REL the new note")
     p.add_argument("--status", choices=STATUSES, default="open")
+    p.add_argument("--project", dest="project_given", help=argparse.SUPPRESS)  # explained, not accepted
     p.add_argument("--created", help="ISO date or datetime; defaults to now (use when backfilling)")
     p.add_argument("--root", action="append", default=[], help="root node (projects), repeatable")
     p.add_argument("--id", help="filename slug (projects)")

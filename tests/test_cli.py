@@ -146,6 +146,9 @@ def test_done_outcomes(populated, ygg, tmp_path):
     _, out = ygg("new", "evidence", "Done at once", "--body", body(tmp_path, EVIDENCE), "--status", "done",
                  "--link", "informs:Is the head wave driven", ok=False)
     assert "done evidence needs an outcome (--outcome succeeded" in out
+    assert "Nothing was written" in out
+    _, out = ygg("new", "question", "Joins a project", "--project", "test-project", ok=False)
+    assert "projects follow from its links" in out
     assert not (populated / "tree" / "EVD - Done at once.md").exists()
 
 
@@ -749,7 +752,8 @@ def test_questions_for_the_user_wait_until_answered(populated, ygg):
     for text in ("Next\n- [ ] read the logs\n- You: accept or reject the new definition",
                  "decision: no Stage 5, still awaiting user acceptance", "**Decision for you:** redefine it?",
                  "- Decide which null is fair (needs the user: it is the whole result)",
-                 "The null choice is the open call; I left it for you."):
+                 "The null choice is the open call; I left it for you.",
+                 "- Decide which null is fair for the claim (user decision)"):
         _, out = ygg("log", text, "--handoff")
         assert "leaves a decision to the user in prose" in out and "--ask" in out
     for text in ("You were right about the cache; fixed it.", "Still waiting on %s." % qid,

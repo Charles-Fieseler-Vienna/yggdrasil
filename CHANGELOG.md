@@ -5,6 +5,13 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
+## 0.5.10 (2026-10-23), tree format 2
+
+- A refused `ygg new` says nothing was written (trial 27 took the refusal for a half-made note and tried to
+  `ygg done` it).
+- `ygg new --project` explains that a note's projects follow from its links.
+- The prose-decision warning also catches "(user decision)".
+
 ## 0.5.9 (2026-10-23), tree format 2
 
 - `ygg new source` and `ygg new dataset` no longer say "in no project yet: ... make it a root": a Source or
