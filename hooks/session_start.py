@@ -12,10 +12,12 @@ HANDOFF_CHARS = 2500
 
 
 def find_trees(cwd):
-    """Trees at or above cwd, else in its subfolders up to three levels down."""
+    """Trees at or above cwd, else, inside a git repository, in its subfolders up to three levels down."""
     for d in [cwd] + list(cwd.parents):
         if (d / "ygg.json").is_file():
             return [d]
+    if not any((d / ".git").exists() for d in [cwd] + list(cwd.parents)):
+        return []  # e.g. a session in ~ should not announce a tree three folders down
     found = []
     for root, dirs, files in os.walk(cwd):
         depth = len(Path(root).relative_to(cwd).parts)

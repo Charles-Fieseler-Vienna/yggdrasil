@@ -35,14 +35,15 @@ def test_vault_goes_before_or_after_the_command(tree):
         assert ", 0 errors" in out
 
 
-def test_tree_found_below_the_working_folder(tree, tmp_path):
-    _, out = run("check", cwd=tmp_path)  # the repository root, with the tree one folder down
-    assert "(using the tree in repo)" in out and ", 0 errors" in out
-    run("init", tmp_path / "other")
+def test_tree_found_below_the_working_folder(tmp_path):
+    make_repo(tmp_path / "proj", "research/tree")
+    _, out = run("check", cwd=tmp_path / "proj")  # the repository root, with the tree two folders down
+    assert "(using the tree in research/tree)" in out and ", 0 errors" in out
+    run("init", tmp_path / "proj" / "other")
+    _, out = run("check", cwd=tmp_path / "proj", ok=False)
+    assert "several trees below it (other, research/tree)" in out
+    # outside a git repository (a home folder) nothing below is used
     _, out = run("check", cwd=tmp_path, ok=False)
-    assert "several trees below it (other, repo)" in out
-    (tmp_path / "empty").mkdir()
-    _, out = run("check", cwd=tmp_path / "empty", ok=False)
     assert "no ygg.json in" in out and "run `ygg init`" in out
 
 
@@ -124,6 +125,17 @@ def test_notebook_and_report_since_handoff(populated, ygg):
     assert "does not exist" in out
     _, out = ygg("check")
     assert "warning: NOTEBOOK.md: [[Missing note]] does not exist" in out
+
+
+def test_log_for_a_note_without_a_run(populated, ygg):
+    ygg("log", "picked this one first", "--tag", "decision", "--for", "Head bending is continuously")
+    text = (populated / "NOTEBOOK.md").read_text()
+    assert text.rstrip().endswith("picked this one first\n\nfor [[CLM - Head bending is continuously driven]]")
+    assert "run id" not in text.split("picked this one first")[1]
+    ygg("log", "about [[CLM - Head bending is continuously driven]]", "--for", "CLM - Head bending is continuously driven")
+    assert (populated / "NOTEBOOK.md").read_text().rstrip().endswith("about [[CLM - Head bending is continuously driven]]")
+    _, out = ygg("log", "fit", "--log", "fit.log", ok=False)
+    assert "--log describes a run" in out
 
 
 def log_run(ygg, text, *args):

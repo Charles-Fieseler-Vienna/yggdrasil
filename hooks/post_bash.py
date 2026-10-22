@@ -1,5 +1,6 @@
 """PostToolUse hook of the ygg plugin, after Bash calls: in a repository holding a ygg tree, nudge
-Claude to keep the lab notebook when a command commits or launches a run. Prints nothing otherwise."""
+Claude to keep the lab notebook when a command commits or launches a run, and to keep analysis scripts in
+the repository when a command runs or writes one elsewhere (/tmp). Prints nothing otherwise."""
 import json
 import os
 import re
@@ -17,11 +18,37 @@ YGG_RE = re.compile(r"(^|[;&|(]\s*|\s)(\S*/)?ygg\s")  # a ygg command anywhere: 
 WAIT_RE = re.compile(r"\b(until|while)\b[^\n]*\b(sleep|pgrep|kill\s+-0|ps)\b|\btail\s+-[fF]|^\s*sleep\b")
 QUOTED_RE = re.compile(r"'[^']*'|\"(\\.|[^\"\\])*\"|<<-?\s*'?(?P<tag>\w+)'?\n.*?\n\s*(?P=tag)\n?", re.S)
 QUIET_MINUTES = 20
+# a script run by an interpreter, or written with a redirect, at an absolute path
+SCRIPT_RE = re.compile(r"(?:\b(?:python[\d.]*|Rscript|julia|bash|sh)\s+(?:-\S+\s+)*|>\s*)(?P<path>/[^\s;&|)'\"]+\.(?:py|R|jl|sh))\b")
+
+
+def outside_scripts(cmd, cwd):
+    """Scripts the command runs or writes outside the git repository around cwd."""
+    repo = next((d for d in [cwd] + list(cwd.parents) if (d / ".git").exists()), None)
+    if repo is None:
+        return []
+    bare = re.sub(r"<<-?\s*'?(\w+)'?\n.*?\n\s*\1\n?", "", cmd, flags=re.S)  # a heredoc's body is not a command
+    found = []
+    for m in SCRIPT_RE.finditer(bare):
+        path = Path(m.group("path"))
+        try:
+            path.resolve().relative_to(repo.resolve())
+        except ValueError:
+            if str(path) not in found:
+                found.append(str(path))
+    return found
 
 
 def nudge(event):
     inp = event.get("tool_input") or {}
     cmd = str(inp.get("command") or "")
+    cwd = Path(event.get("cwd") or os.getcwd()).resolve()
+    scripts = outside_scripts(cmd, cwd)
+    if scripts and find_trees(cwd):
+        return ("This command runs or writes a script outside the repository (%s). If its output feeds a "
+                "result (a number in the notebook, an Evidence note), put the script in the repository (e.g. "
+                "scripts/), commit it, and cite it as `repository@commit:path`, so the result can be traced "
+                "and rerun; a quick look at some data can stay where it is." % ", ".join(scripts[:3]))
     if YGG_RE.search(cmd):
         return None
     bare = QUOTED_RE.sub("''", cmd)  # what quotes and heredocs say ("detach with setsid") is not a command
@@ -29,7 +56,7 @@ def nudge(event):
     committed = bool(COMMIT_RE.search(bare))
     if not (launched or committed):
         return None
-    trees = find_trees(Path(event.get("cwd") or os.getcwd()).resolve())
+    trees = find_trees(cwd)
     if not trees:
         return None
     if launched:

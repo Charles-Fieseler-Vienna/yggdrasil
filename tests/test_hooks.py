@@ -27,6 +27,8 @@ def test_hooks_json_points_at_real_files():
 
 def test_session_start_silent_without_a_tree(tmp_path):
     assert hook("session_start.py", {"cwd": str(tmp_path)}) == ""
+    make_repo(tmp_path / "proj", "research/tree")  # below, but tmp_path is no repository (like ~)
+    assert hook("session_start.py", {"cwd": str(tmp_path)}) == ""
 
 
 def test_session_start_finds_a_project_tree(tmp_path):
@@ -77,6 +79,14 @@ def test_post_bash(tmp_path):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     assert nudge(elsewhere, "sbatch run.sh") is None
+    # analysis scripts outside the repository
+    assert "/tmp/x/angles.py" in nudge(repo, ".venv/bin/python /tmp/x/angles.py results/a")
+    assert "/tmp/x/scan.py" in nudge(repo, "mkdir -p /tmp/x && cat > /tmp/x/scan.py <<'EOF'\nimport numpy\nEOF")
+    assert "outside the repository" in nudge(repo, "python3 -u /tmp/fit.py && ygg log 'fit done'")
+    assert nudge(repo, "python scripts/fit.py") is None
+    assert nudge(repo, "python %s/scripts/fit.py" % repo) is None
+    assert nudge(repo, "cat > /tmp/src.md <<'E'\nrun python /tmp/a.py\nE") is None  # a note body, a heredoc's text
+    assert nudge(elsewhere, "python /tmp/fit.py") is None
 
 
 def test_session_start_lists_open_issues_and_todos(tmp_path):
@@ -101,8 +111,8 @@ def test_session_start_mentions_uncommitted_tree_changes(tmp_path):
     assert "Uncommitted in the tree: 1 note, NOTEBOOK.md" in out
 
 
-def guard(cwd, command):
-    out = hook("pre_bash.py", {"cwd": str(cwd), "tool_name": "Bash", "tool_input": {"command": command}})
+def guard(cwd, command, **event):
+    out = hook("pre_bash.py", dict(event, cwd=str(cwd), tool_name="Bash", tool_input={"command": command}))
     return json.loads(out)["hookSpecificOutput"] if out.strip() else None
 
 
@@ -119,3 +129,19 @@ def test_pre_bash_stops_self_matching_wait_loops(tmp_path):
     assert guard(repo, "pgrep -af n-matched | grep -v bash") is None
     (tmp_path / "elsewhere").mkdir()
     assert guard(tmp_path / "elsewhere", 'until ! pgrep -f "n-matched"; do sleep 10; done') is None
+
+
+def test_pre_bash_caps_subagent_confidence(tmp_path):
+    repo = tmp_path / "proj"
+    make_repo(repo, "research/tree")
+    sub = {"agent_id": "a1b2", "agent_type": "general-purpose"}
+    cmd = 'cd research/tree && ygg new evidence "Fit wins" --body e.md --link "informs:Q" --confidence high'
+    out = guard(repo, cmd, **sub)
+    assert out["permissionDecision"] == "deny" and "--confidence medium" in out["permissionDecisionReason"]
+    assert guard(repo, 'ygg set "CLM - X" --confidence refuted', **sub)
+    assert guard(repo, cmd.replace("high", "medium"), **sub) is None
+    assert guard(repo, cmd) is None  # the main session may
+    assert guard(repo, "grep -- '--confidence high' notes.md && ygg show X", **sub) is None
+    (tmp_path / "elsewhere").mkdir()
+    assert guard(tmp_path / "elsewhere", cmd, **sub) is None
+

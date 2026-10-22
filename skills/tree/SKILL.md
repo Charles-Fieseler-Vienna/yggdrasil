@@ -64,7 +64,9 @@ prints a run id. Most runs stay in the notebook: when one ends, note its result 
 it). When a result matters, record it as a node: a Source with `--run repository@commit:path` and the
 Evidence derived from it, citing the run ids in its Method. `run` uses a real commit (`git -C REPO rev-parse
 --short HEAD`), never a branch; if the run used uncommitted code, tell the user rather than citing a commit
-that doesn't match. `ygg runs` lists runs still going or not looked at; `ygg watch` (in the background)
+that doesn't match. So any script whose output feeds a result (a number in the notebook, an Evidence note)
+goes in the repository (e.g. `scripts/`) and is committed before it is cited, never in `/tmp` or as a long
+inline `python - <<EOF`; quick looks at data can stay inline. `ygg runs` lists runs still going or not looked at; `ygg watch` (in the background)
 returns when they end, with the last lines of each log, reporting failures on the way. Wait with it rather than a loop of your own, and stop
 any background wait you started before you finish (a leftover one keeps a headless session from ending).
 
@@ -124,6 +126,9 @@ Commit only when the user asks, or has asked you to maintain the tree as part of
 - **One idea per title.** No semicolons, sub-claims, guesses at causes or figure references; those go in the body.
 - **A Question stays a Question.** When evidence answers it, add a Claim that `addresses` it. Never change a node's type.
 - **Every Claim needs supporting Evidence**, and Claims and Evidence carry `confidence` (`low`, `medium`, `high`; `refuted` for Claims).
+  A subagent writes at most `medium` (a hook refuses `high` and `refuted` from subagents) and gives its case
+  in its report; the main session raises the confidence after checking the work. When you hand tree work to
+  a subagent, tell it to load this skill and to change the tree only through `ygg`.
 - **Conclusion is the important part of Evidence.** One to three sentences, readable on their own: what the result means, with effect size, n (animals, recordings), and which Dataset or subset.
 - **Caveats are required** on Evidence: missing runs, data limits, anything that bounds the result, even if "none known".
 - **Failed and ambiguous results are worth recording.** Say what would make them worth retrying.

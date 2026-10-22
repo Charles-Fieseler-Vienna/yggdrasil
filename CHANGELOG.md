@@ -5,6 +5,20 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
+## 0.5.2 (2026-10-22), tree format 2
+
+- The search for a tree in subfolders (the CLI's, new in 0.5.1, and the session hook's) happens only inside a
+  git repository: `ygg` run in `~` no longer picks up the main tree three folders down, and a session started
+  in `~` no longer announces it.
+- `ygg log "..." --tag decision --for NOTE` without a run adds `for [[NOTE]]` to the entry instead of failing
+  with "--log and --for describe a run" (trial 20).
+- Analysis scripts belong in the repository: the `ygg:tree` skill says so (a script whose output feeds a
+  result is committed before it is cited, never left in `/tmp`), and the post-Bash hook reminds Claude when
+  a command runs or writes a script outside the repository.
+- Subagents write confidence at most `medium`: the pre-Bash hook refuses `--confidence high` or `refuted`
+  from a subagent's `ygg` command (hooks see its `agent_id`), and the `ygg:tree` skill tells the main
+  session to raise confidence itself after review, and to tell subagents it gives tree work to load the skill.
+
 ## 0.5.1 (2026-10-22), tree format 2
 
 - Run from a repository whose tree sits in a subfolder (`research/tree`), `ygg` now finds that tree, as the

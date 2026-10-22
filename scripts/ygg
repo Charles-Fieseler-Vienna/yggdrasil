@@ -24,7 +24,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-__version__ = "0.5.1"  # the tool; keep .claude-plugin/plugin.json in step
+__version__ = "0.5.2"  # the tool; keep .claude-plugin/plugin.json in step
 # The tree format. Bump it when a tree written by this ygg could fail the checks of an older one, and
 # teach `ygg init` to upgrade older trees; ygg.json records each tree's format as spec_version.
 SPEC_VERSION = 2  # 2: notes in no project are allowed (a warning, not an error)
@@ -318,12 +318,14 @@ def trees_below(p, depth=3):
 
 
 def find_vault(start):
-    """The tree at or above start; else the only tree a few levels below it (as the hooks find it)."""
+    """The tree at or above start; else, inside a git repository, the only tree a few levels below it (as the hooks
+    find it)."""
     p = Path(start).resolve()
     for d in [p] + list(p.parents):
         if (d / "ygg.json").exists():
             return d
-    below = trees_below(p)
+    # downwards only inside a git repository, so that `ygg` in ~ does not pick up a tree three folders down
+    below = trees_below(p) if any((d / ".git").exists() for d in [p] + list(p.parents)) else []
     if len(below) == 1:
         print("(using the tree in %s)" % os.path.relpath(below[0], p), file=sys.stderr)
         return below[0]
@@ -1505,8 +1507,12 @@ def cmd_log(a):
         rid = new_run_id(vault.root, a.pid, a.job)
         text += "\n\n" + run_line(rid, a.pid, a.job, logs, note)
         tag = tag or "run"
-    elif a.log or a.note:
-        die("--log and --for describe a run; give its --pid (or --job) too")
+    elif a.log:
+        die("--log describes a run; give its --pid (or --job) too")
+    elif a.note:  # an entry about a note (a decision, a dead end) rather than a run for it
+        stem = vault.resolve(a.note).stem
+        if wikilink(stem) not in text:
+            text += "\n\nfor " + wikilink(stem)
     iid = None
     if a.issue:
         affects = [vault.resolve(x).stem for x in a.affects]
@@ -2644,7 +2650,7 @@ def main(argv=None):
     p.add_argument("--pid", action="append", default=[], help="log a run: a process on this machine (repeatable)")
     p.add_argument("--job", action="append", default=[], help="log a run: a cluster job id (repeatable)")
     p.add_argument("--log", action="append", default=[], help="the run's log file (repeatable)")
-    p.add_argument("--for", dest="note", help="the note the run serves, when it already exists")
+    p.add_argument("--for", dest="note", help="the note the run serves, when it already exists; without a run, the note the entry is about")
     p.add_argument("--todo", action="append", default=[], help="add a to-do to the entry, `- [ ] TODO`, listed by "
                    "the report until ticked (repeatable; alone, the entry is just the to-dos)")
     p.add_argument("--issue", action="store_true", help="log an issue: a bug or problem in data, code or a method "
