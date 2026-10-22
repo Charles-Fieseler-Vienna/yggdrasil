@@ -63,12 +63,6 @@ project's tree (the folder with `ygg.json`, e.g. `research/tree`), or pass `--va
 
 ## During a session
 
-When working in a project, append decisions, dead ends and surprises to the notebook as they happen with
-`ygg log "..." --tag decision` (or `dead-end`, `idea`). Log every run you launch, or the user tells you
-about: `ygg log "what and why" --pid N --log PATH` (repeat for a sweep; `--job ID` for a cluster job;
-`--for NOTE` when it serves an existing note). Cite its run id where its result ends up, or in a notebook
-line; give up runs with `ygg drop ID -m "why"` (`--kill` to stop them). Note small next steps as to-dos
-(`ygg log "..." --todo "..."`), a problem in data or code as an issue (`--issue --affects NOTE`), and a
-decision only the user can make as a question (`--ask "..." --on NOTE --blocks NOTE`; see the `ygg:tree`
-skill). Never edit or reorder past entries, except ticking a to-do with `ygg tick`; correct one
-with a new entry. The plugin's hook reminds you after commits and launches.
+Keep the notebook as the `ygg:tree` skill says (decisions, dead ends, runs with their PIDs, to-dos, issues,
+questions for the user), as things happen. Never edit or reorder past entries, except ticking a to-do with
+`ygg tick`; correct one with a new entry.

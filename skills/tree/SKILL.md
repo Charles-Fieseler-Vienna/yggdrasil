@@ -1,6 +1,6 @@
 ---
 name: tree
-description: How to read and change a ygg research tree (a discourse graph of Questions, Claims, Evidence, Sources and Datasets kept as Obsidian notes). Load before creating, linking, finishing or superseding notes in any repository with a ygg.json, before compressing a project into the main tree, or when recording a run.
+description: How to read and change a ygg research tree (a discourse graph of Questions, Claims, Evidence, Sources and Datasets kept as Obsidian notes). Load before creating, linking, finishing or superseding notes in any repository with a ygg.json, or when recording a run.
 ---
 
 # Working in a ygg tree
@@ -77,18 +77,8 @@ the `ygg:seed` skill also expands it into concrete sub-questions and planned run
 **Changing a conclusion.** Never edit a `done` node. Create a new node of the same type with
 `--link supersedes:OLD`, saying what changed and why, then update the project's Findings.
 
-**Compressing a project into the main tree** (with the user, once the project tree is committed): run
-`ygg compress PATH/TO/project/tree` in the main tree; it prints the outline and records the tree as a Source.
-Then write the compressed nodes: about one Question per figure, one Claim per one to three panels, each Claim
-with its own Evidence derived from the tree Source and the Dataset. Keep generalizable results, dead ends and
-open questions; leave narrow methods in the project tree. Add roots with `ygg set PROJECT --add-root NOTE`.
-The outline's **Papers** list says which papers already have a Source in the main tree (derive from that one;
-never make a second) and which lack a Zotero key or DOI. **Seeded from this tree** lists the notes copied
-from the main tree with what the project added under them: write those against the original notes, not new
-copies. **Out of scope there** and **In no project there** list notes the project left for elsewhere,
-often from brainstorms: with the user, move each into the main tree as a new note (the project's stays), or
-leave it. On a second compression of the same tree, **Since the last compression** lists only the new and
-changed notes, relations and notebook entries, and the outline marks them.
+**Compressing a project into the main tree** (with the user, once the project tree is committed) uses
+`ygg:compress`.
 
 **The notebook.** While working, append decisions, dead ends and surprises as they happen:
 `ygg log "..." --tag decision` (or `dead-end`, `run`, `idea`). At the end of a session use `ygg:handoff`.

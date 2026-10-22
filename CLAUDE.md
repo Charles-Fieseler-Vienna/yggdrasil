@@ -7,7 +7,7 @@ This repo is **ygg**, the tool for the user's discourse-graph research trees: th
 - `scripts/ygg`: the CLI, one file. A uv script; every command but `serve` is standard library only and runs on plain `python3`.
 - `scripts/ygg_server.py` and `scripts/web/`: the web app (FastAPI, and React Flow with no build step).
 - `bin/ygg`: the plugin's `ygg` command; uses uv only for `serve`.
-- `skills/<name>/SKILL.md`: the plugin's skills, `ygg:tree` (the working rules), `ygg:seed`, `ygg:paper`, `ygg:digest`, `ygg:brainstorm`, `ygg:handoff`. Write `ygg`, never `scripts/ygg`, in them, and `${CLAUDE_PLUGIN_ROOT}/DESIGN.md` for the spec.
+- `skills/<name>/SKILL.md`: the plugin's skills, `ygg:tree` (the working rules), `ygg:seed`, `ygg:paper`, `ygg:digest`, `ygg:brainstorm`, `ygg:handoff`, `ygg:compress`. Write `ygg`, never `scripts/ygg`, in them, and `${CLAUDE_PLUGIN_ROOT}/DESIGN.md` for the spec.
 - `hooks/`: the SessionStart hook (the rules and the tree's state), the pre-Bash hook (stops wait loops that can never end) and the post-Bash hook (notebook reminders), all silent where no tree is found.
 - `.claude-plugin/`: `plugin.json` and `marketplace.json`. Bump the plugin `version` when the skills or hooks change in a way users should pick up.
 

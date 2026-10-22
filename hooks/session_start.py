@@ -109,7 +109,7 @@ def main():
            "`ygg log \"...\" --tag decision` (or dead-end, idea), and log every run you launch with "
            "`ygg log ... --pid N --log PATH`. When the user wraps up, offer the ygg:handoff skill. When they "
            "step back to think about what to pursue, use ygg:brainstorm; ygg:seed starts a project's tree "
-           "from questions in another tree, and `ygg compress` brings a project's results back. For papers "
+           "from questions in another tree, and ygg:compress brings a project's results back. For papers "
            "use ygg:paper or ygg:digest.", ""]
     for root in trees:
         out += summary(ygg, root, cwd)

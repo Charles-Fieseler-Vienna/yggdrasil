@@ -5,6 +5,11 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
+## 0.5.3 (2026-10-23), tree format 2
+
+- Compression moves out of the `ygg:tree` skill into its own `ygg:compress` skill, and `ygg:handoff` no
+  longer repeats the tree skill's notebook rules: about 1.8 KB less for every session to load.
+
 ## 0.5.2 (2026-10-22), tree format 2
 
 - The search for a tree in subfolders (the CLI's, new in 0.5.1, and the session hook's) happens only inside a

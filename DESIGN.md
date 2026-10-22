@@ -49,7 +49,7 @@ yggdrasil/
 ├── .claude-plugin/   # plugin.json and marketplace.json (see Plugin)
 ├── bin/ygg           # the command, put on Claude's PATH by the plugin
 ├── hooks/            # the SessionStart, pre-Bash and post-Bash hooks
-├── skills/           # tree, seed, paper, digest, brainstorm, handoff
+├── skills/           # tree, seed, paper, digest, brainstorm, handoff, compress
 ├── tests/            # pytest: the CLI, the hooks, the web app (optional)
 ├── schema/
 │   └── dg-schema-yggdrasil.json   # the schema as a DG export, for manual import (`ygg schema`)
@@ -476,8 +476,9 @@ claude plugin install ygg@yggdrasil
 | `hooks/post_bash.py` | After a Bash command, in a repository with a tree: if it runs or writes a script (`.py`, `.R`, `.jl`, `.sh`) at a path outside the repository, such as `/tmp`, reminds Claude that a script whose output feeds a result belongs in the repository, committed and cited as `repository@commit:path`; if it launched a run (`nohup`, `sbatch`, a trailing `&`, a background command...), reminds Claude to log it with its PID, host and logs; if it committed and the notebook has no entry from the last 20 minutes, reminds Claude to log any decision or result. Silent elsewhere. |
 | `hooks/session_start.py` | At session start, looks for a tree at or above the working directory, else, inside a git repository, up to three levels below it (so a session in `~` announces no tree). If it finds one, it adds the rules in brief (load `ygg:tree`, change notes only with `ygg`, keep the notebook and log runs, offer a handoff, brainstorm, seed and compress) and where the work stands: counts, in-progress and high-priority notes, the last handoff and how many entries followed it, open issues and the number of open to-dos, the runs named since, uncommitted changes in the tree (the sign of a session that stopped before recording its work), and a tree in another format. The web app's Overview shows the same, word for word. Elsewhere it prints nothing. |
 | `ygg:seed` | Starts a project tree from main-tree questions with `ygg seed`, then expands them into sub-questions and planned runs. |
-| `ygg:tree` | The working rules: the one rule, commands and allowed relations, runs, superseding, compression, the notebook, and how to write nodes. |
+| `ygg:tree` | The working rules: the one rule, commands and allowed relations, runs, superseding, the notebook, and how to write nodes. |
 | `ygg:paper` | Adds one paper as a Source (from Zotero) and records what it means for a project as Evidence. |
 | `ygg:digest` | Breaks a whole paper, usually one's own, into Questions, Claims and Evidence derived from it, with its Datasets and the open questions of its Discussion. Given the paper's code repository, it also links the script behind each figure as a run Source at the commit matching the paper, which the figure's Evidence derives from; the outputs are not rerun, so the paper stays the Source of the results. |
 | `ygg:brainstorm` | Interviews the user to grow a tree: new questions, connections across projects and papers, or a sketch of a new project; writes what is agreed. |
+| `ygg:compress` | Compresses a project tree into the main tree with `ygg compress`: the outline, papers already there, notes seeded from the main tree (written against their originals), out-of-scope notes, and on a second compression only what changed. |
 | `ygg:handoff` | Distils the notebook into the tree and writes a handoff entry; on catching up, reads it back with `ygg report --since handoff`. |
