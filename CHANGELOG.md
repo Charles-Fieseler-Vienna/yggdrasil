@@ -5,6 +5,12 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
+## 0.5.5 (2026-10-23), tree format 2
+
+- An answer from the user is shown in full up to 1500 characters in the report and the session briefing,
+  with a marked cut and a pointer beyond that; `ygg asks --all` prints it whole. It was cut at 300
+  characters, silently, which dropped two of three conditions in a real answer.
+
 ## 0.5.4 (2026-10-23), tree format 2
 
 - `ygg show` leaves out the Obsidian plugin's `nodeTypeId` and `nodeInstanceId`, which mean nothing to a reader.
@@ -19,6 +25,7 @@ tree's `ygg.json`) changes only when a tree written by a new ygg could fail the 
 
 - Compression moves out of the `ygg:tree` skill into its own `ygg:compress` skill, and `ygg:handoff` no
   longer repeats the tree skill's notebook rules: about 1.8 KB less for every session to load.
+
 ## 0.5.2 (2026-10-22), tree format 2
 
 - The search for a tree in subfolders (the CLI's, new in 0.5.1, and the session hook's) happens only inside a

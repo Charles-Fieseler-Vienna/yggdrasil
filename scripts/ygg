@@ -24,7 +24,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-__version__ = "0.5.4"  # the tool; keep .claude-plugin/plugin.json in step
+__version__ = "0.5.5"  # the tool; keep .claude-plugin/plugin.json in step
 # The tree format. Bump it when a tree written by this ygg could fail the checks of an older one, and
 # teach `ygg init` to upgrade older trees; ygg.json records each tree's format as spec_version.
 SPEC_VERSION = 2  # 2: notes in no project are allowed (a warning, not an error)
@@ -1375,12 +1375,17 @@ def asks_answered_since_handoff(root):
     return [q for q in all_asks(root) if q["answered"] and (not hand or q["answer_entry"] > hand[-1])]
 
 
-def describe_ask(q):
+ANSWER_CHARS = 1500
+
+
+def describe_ask(q, full=False):
     links = "".join(" · %s %s" % (k, ", ".join("[[%s]]" % x for x in q[k])) for k in ("on", "blocks") if q[k])
     lines = ["- %s (%s): %s%s" % (q["id"], q["when"], q["question"], links)]
     if q["answer"]:
-        lines.append("  answered%s: %s" % (" " + q["answered"] if q["answered"] else "",
-                                           " ".join(q["answer"].split())[:300]))
+        text = " ".join(q["answer"].split())
+        if len(text) > ANSWER_CHARS and not full:  # the user's answer matters; never cut it silently
+            text = text[:ANSWER_CHARS] + " […] (in full: `ygg asks --all`, or NOTEBOOK.md)"
+        lines.append("  answered%s: %s" % (" " + q["answered"] if q["answered"] else "", text))
     return lines
 
 
@@ -1407,7 +1412,7 @@ def cmd_asks(a):
         print("No questions waiting on the user%s." % ("" if a.all else " (`--all` lists answered ones too)"))
         return
     for q in asks:
-        print("\n".join(describe_ask(q)))
+        print("\n".join(describe_ask(q, full=True)))
 
 
 def cmd_answer(a):

@@ -691,6 +691,14 @@ def test_questions_for_the_user_wait_until_answered(populated, ygg):
     assert "waiting on the user" not in first["EVD - Neural test of the new basis"]
     code, out = ygg("answer", qid, "-m", "No.", ok=False)
     assert code and "answered already" in out
+    # a long answer is never cut silently: the report marks the cut, `ygg asks --all` prints it in full
+    long = "Accept it with conditions. " + "Condition text. " * 150 + "Last condition."
+    ygg("log", "--ask", "Which conditions?")
+    ygg("answer", "a%s-3" % today, "-m", long)
+    _, out = ygg("report")
+    assert "[…] (in full: `ygg asks --all`" in out and "Last condition." not in out
+    _, out = ygg("asks", "--all")
+    assert "Last condition." in out
     code, out = ygg("log", "x", "--blocks", "Neural test", ok=False)
     assert code and "add --ask" in out
     ygg("log", "done for today", "--handoff")
