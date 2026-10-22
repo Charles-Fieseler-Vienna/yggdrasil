@@ -9,6 +9,7 @@ tree's `ygg.json`) changes only when a tree written by a new ygg could fail the 
 
 - `--vault` is accepted after the command too (`ygg check --vault PATH`).
 - Evidence not yet done without a Source is planned work, flagged open, no longer a gap.
+- `ygg seed --depth N` brings each Claim's Evidence along; it left them behind, and the copies failed `ygg check`.
 
 ## 0.3.0 (2026-10-22), tree format 2
 

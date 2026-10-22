@@ -401,11 +401,12 @@ class Vault:
     def below(self, starts, depth=None, edges=None):
         """Stems of `starts` and the notes under them: notes that follow from, address, inform, support,
         oppose or supersede a note under, and the Sources and Datasets those are derived from. `depth`
-        limits the steps down (derivations do not count as steps)."""
+        limits the steps down; derivations, and the Evidence for or against a Claim, do not count as steps,
+        so a Claim always comes with its Evidence."""
         up, derived = defaultdict(list), defaultdict(list)
         for rel, s, d in self.edges() if edges is None else edges:
             if rel in DOWN:
-                up[d.stem].append(s.stem)
+                up[d.stem].append((s.stem, rel in ("supports", "opposes")))
             elif rel == "derived-from":
                 derived[s.stem].append(d.stem)
         seen, frontier = {}, [(s, 0) for s in starts]
@@ -415,8 +416,9 @@ class Vault:
                 continue
             seen[stem] = k
             frontier += [(d, k) for d in derived[stem]]
+            frontier += [(u, k) for u, free in up[stem] if free]
             if depth is None or k < depth:
-                frontier += [(u, k + 1) for u in up[stem]]
+                frontier += [(u, k + 1) for u, free in up[stem] if not free]
         return set(seen)
 
     def membership(self):

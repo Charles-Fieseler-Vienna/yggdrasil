@@ -297,6 +297,11 @@ def test_seed_depth_and_plain_links(populated, project, tmp_path):
     assert out.count("- copy") == 1 and "1 links to notes not copied made plain text" in out
     text = (project / "tree" / "QUE - Follow up.md").read_text()
     assert "See EVD - Innovations travel down the body." in text
+    # a claim always comes with its evidence (and that with its sources), whatever the depth
+    _, out = seed(project, "Is the head wave", "--from", populated, "--depth", "1")
+    assert "copy [[CLM - Head bending" in out and "copy [[EVD - Innovations travel" in out and "copy [[@Head run]]" in out
+    _, out = run("--vault", project, "check")
+    assert ", 0 errors" in out
 
 
 def test_seed_needs_a_committed_main_tree(populated, project):
