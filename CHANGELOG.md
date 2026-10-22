@@ -9,6 +9,10 @@ tree's `ygg.json`) changes only when a tree written by a new ygg could fail the 
 
 - `--vault` is accepted after the command too (`ygg check --vault PATH`).
 - Evidence not yet done without a Source is planned work, flagged open, no longer a gap.
+- A run logged `--for` a note is no longer flagged once something mentions it, though its note is not done
+  (a run for a Question stayed flagged for as long as the Question was open).
+- The post-Bash hook ignores commands that run `ygg` anywhere, words inside quotes and heredocs, and
+  background commands that only wait (a loop on `pgrep` or `sleep`, `tail -f`).
 - `ygg seed --depth N` brings each Claim's Evidence along; it left them behind, and the copies failed `ygg check`.
 
 ## 0.3.0 (2026-10-22), tree format 2

@@ -12,16 +12,21 @@ from session_start import find_trees  # same folder; hooks run with it on sys.pa
 LAUNCH_RE = re.compile(r"\b(nohup|sbatch|srun|qsub|setsid)\b|\bscreen\s+-d|\btmux\s+new(-session)?\b.*\s-d\b"
                        r"|(?<!&)&\s*(disown\s*)?$", re.M)
 COMMIT_RE = re.compile(r"\bgit\b[^|;&\n]*\bcommit\b")
+YGG_RE = re.compile(r"(^|[;&|(]\s*|\s)(\S*/)?ygg\s")  # a ygg command anywhere: it is the logging itself
+# A background command that only waits for something else (a loop on pgrep, sleep, tail -f) is not a run.
+WAIT_RE = re.compile(r"\b(until|while)\b[^\n]*\b(sleep|pgrep|kill\s+-0|ps)\b|\btail\s+-[fF]|^\s*sleep\b")
+QUOTED_RE = re.compile(r"'[^']*'|\"(\\.|[^\"\\])*\"|<<-?\s*'?(?P<tag>\w+)'?\n.*?\n\s*(?P=tag)\n?", re.S)
 QUIET_MINUTES = 20
 
 
 def nudge(event):
     inp = event.get("tool_input") or {}
     cmd = str(inp.get("command") or "")
-    if re.match(r"\s*(\S*/)?ygg\b", cmd):
+    if YGG_RE.search(cmd):
         return None
-    launched = bool(inp.get("run_in_background")) or bool(LAUNCH_RE.search(cmd))
-    committed = bool(COMMIT_RE.search(cmd))
+    bare = QUOTED_RE.sub("''", cmd)  # what quotes and heredocs say ("detach with setsid") is not a command
+    launched = (bool(inp.get("run_in_background")) and not WAIT_RE.search(bare)) or bool(LAUNCH_RE.search(bare))
+    committed = bool(COMMIT_RE.search(bare))
     if not (launched or committed):
         return None
     trees = find_trees(Path(event.get("cwd") or os.getcwd()).resolve())

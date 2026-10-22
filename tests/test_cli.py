@@ -174,6 +174,19 @@ def test_runs_are_logged_and_looked_at(populated, ygg, tmp_path):
         sleeper.kill()
 
 
+def test_a_run_for_a_note_is_looked_at_once_mentioned(populated, ygg):
+    ygg("new", "question", "Does it hold on the full cohort", "--link", "follows-from:Head bending")
+    done = subprocess.Popen(["true"])
+    done.wait()
+    pilot = log_run(ygg, "pilot", "--pid", str(done.pid), "--for", "full cohort")
+    ygg("log", "pilot is wired up", "--handoff")
+    _, out = ygg("report")
+    assert "%s ended" % pilot in out and "is not done" in out  # flagged across the handoff
+    ygg("log", "%s: pipeline check only, not evidence" % pilot)
+    _, out = ygg("report")
+    assert pilot not in out.split("## Needs action")[-1] or "## Needs action" not in out
+
+
 def test_drop(populated, ygg):
     ygg("new", "evidence", "Pending fit", "--link", "informs:Is the head wave")
     runner = subprocess.Popen(["sleep", "60"])

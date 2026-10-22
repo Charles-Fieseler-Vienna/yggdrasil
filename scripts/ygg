@@ -1355,16 +1355,16 @@ def run_states(vault):
 
 
 def needs_action(vault, found):
-    """Lines for runs that need someone: ended runs since the last handoff that nothing mentions yet, ended
-    runs whose `for` note is not done, and running ones whose logs have gone quiet."""
+    """Lines for runs that need someone: ended runs that nothing mentions yet, if logged since the last
+    handoff or for a note not done (whenever logged), and running ones whose logs have gone quiet."""
     out = []
     for r in found:
         note = vault.nodes.get(r["note"]) if r["note"] else None
         if r["dropped"]:
             continue
-        if r["state"] == "ended" and note is not None and note.status != "done":
-            out.append("- %s ended (%s); [[%s]] is not done: read its output and fill it in" % (
-                r["id"], r["when"], note.stem))
+        if r["state"] == "ended" and not r["seen"] and note is not None:
+            out.append("- %s ended (%s), nothing mentions it, and [[%s]] is not done: read its output, and "
+                       "fill in the note or note the result in a line of the notebook" % (r["id"], r["when"], note.stem))
         elif r["state"] == "ended" and r["recent"] and not r["seen"]:
             out.append("- %s ended (%s) and nothing mentions it yet: note the result in a node, or in a line "
                        "of the notebook" % (r["id"], r["when"]))

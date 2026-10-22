@@ -65,6 +65,12 @@ def test_post_bash(tmp_path):
     assert "You committed" in nudge(repo, "git add -A && git commit -m 'x'")
     assert nudge(repo, "ls && echo done") is None
     assert nudge(repo, "ygg log 'x' && git commit -m x") is None
+    assert nudge(repo, "cd research/tree && ygg log \"budget 1 h, detached with setsid &\"") is None
+    assert nudge(repo, "git commit -m 'run it with nohup later'") is not None  # a commit, not a launch
+    assert "started a run" not in nudge(repo, "git commit -m 'run it with nohup later'")
+    assert nudge(repo, "until ! pgrep -f fit.py >/dev/null; do sleep 5; done; tail -5 fit.log",
+                 background=True) is None
+    assert nudge(repo, "tail -f fit.log", background=True) is None
     os.utime(book, None)
     assert nudge(repo, "git commit -m x") is None  # the notebook was just written
     assert "started a run" in nudge(repo, "nohup python fit.py &")
