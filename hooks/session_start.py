@@ -61,6 +61,11 @@ def summary(ygg, root, cwd):
         e = entries[hand[-1]]
         text = e["text"] if len(e["text"]) <= HANDOFF_CHARS else e["text"][:HANDOFF_CHARS] + " […]"
         lines.append("  Last handoff (%s), in NOTEBOOK.md:\n\n%s\n" % (e["when"], text))
+        prose = ygg.prose_decision(e["text"], root)
+        if prose:
+            lines.append("  That handoff leaves a decision to the user in prose (%r) with no question asked. Ask it "
+                         "now, once, so it waits for them: `ygg log \"the context\" --ask \"...?\" --on NOTE "
+                         "--blocks NOTE`." % prose[:120])
         later = len(entries) - hand[-1] - 1
         if later:
             lines.append("  %d notebook entr%s since that handoff; `ygg report --since handoff` lists them."

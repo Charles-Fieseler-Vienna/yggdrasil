@@ -24,7 +24,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-__version__ = "0.5.10"  # the tool; keep .claude-plugin/plugin.json in step
+__version__ = "0.5.11"  # the tool; keep .claude-plugin/plugin.json in step
 # The tree format. Bump it when a tree written by this ygg could fail the checks of an older one, and
 # teach `ygg init` to upgrade older trees; ygg.json records each tree's format as spec_version.
 SPEC_VERSION = 2  # 2: notes in no project are allowed (a warning, not an error)
@@ -1160,6 +1160,21 @@ USER_DECISION_RE = re.compile(
     r"|\b(?:awaiting|waiting (?:on|for)) (?:the )?user\b|\buser(?:'?s)? (?:call|decision)\b|\bfor you to decide\b|\b(?:decision|question)s? for (?:you|the user)\b"
     r"|\b(?:accept|approve) or reject\b|\bgo/no-go\b|\bneeds? (?:the )?user\b(?![-'])|\bleft (?:it )?(?:for|to) (?:you|the user)\b",
     re.I | re.M)
+
+
+def prose_decision(text, root):
+    """The first line of an entry that leaves a decision to the user in prose, unless that line refers to a
+    question already asked (by id, or as "the question" while one waits)."""
+    waiting = None
+    for line in text.splitlines():
+        if not USER_DECISION_RE.search(line) or re.search(r"\ba\d{6}-\d+\b", line):
+            continue
+        if re.search(r"\bquestion", line, re.I):
+            if waiting is None:
+                waiting = any(not q["answer"] for q in all_asks(root))
+            if waiting:
+                continue
+        return line.strip()
 ISSUE_LINE_RE = re.compile(r"^[ \t]*(?:[-*] \[([ xX])\] )?issue (i\d{6}-\d+)(?: · affects (.*))?$", re.M)
 RESOLVED_LINE_RE = re.compile(r"^resolved ((?:i\d{6}-\d+(?:, )?)+)$", re.M)
 
@@ -1567,12 +1582,8 @@ def cmd_log(a):
     if not text:
         die("give the entry as an argument, or with --body FILE (or - for stdin)")
     head = append_entry(vault.root, tag, text)
-    # not when the entry asks, or refers to a question already waiting (by id, or as "the question")
-    asked = qid or re.search(r"\ba\d{6}-\d+\b", text) or (
-        re.search(r"\bquestion", text, re.I) and any(not q["answer"] for q in all_asks(vault.root)))
-    hit = None if asked else USER_DECISION_RE.search(text)
-    if hit:
-        line = next(l for l in text.splitlines() if hit.group(0).strip() in l).strip()
+    line = None if qid else prose_decision(text, vault.root)
+    if line:
         warn("this entry leaves a decision to the user in prose (%r). Ask it as a question, so it waits for "
              "them in the report, the session briefing and the web app, where they answer it: "
              "`ygg log \"the context\" --ask \"...?\" --on NOTE --blocks NOTE`" % line[:100])

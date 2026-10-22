@@ -42,6 +42,17 @@ def test_session_start_finds_a_project_tree(tmp_path):
     assert "Runs since the last handoff or still running: 1 running." in out and "`ygg runs`" in out
 
 
+def test_session_start_flags_a_decision_left_in_prose(tmp_path):
+    root = make_repo(tmp_path / "proj")
+    run("--vault", root, "log", "--ask", "Rerun on the new export?")
+    run("--vault", root, "log", "--handoff", "--body", "-",
+        stdin="Next\n- a261022-1 still waits.\n- Decide which null is fair (user decision).\n")
+    out = hook("session_start.py", {"cwd": str(root)})
+    assert "leaves a decision to the user in prose ('- Decide which null is fair (user decision).')" in out
+    run("--vault", root, "log", "--handoff", "--body", "-", stdin="Next\n- The null waits on a261022-2 (user decision).\n")
+    assert "leaves a decision" not in hook("session_start.py", {"cwd": str(root)})
+
+
 def test_session_start_reports_format(tmp_path):
     root = make_repo(tmp_path / "proj")
     (root / "ygg.json").write_text(json.dumps({"spec_version": 0}))

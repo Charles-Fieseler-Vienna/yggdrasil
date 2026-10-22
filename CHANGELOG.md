@@ -5,6 +5,13 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
+## 0.5.11 (2026-10-23), tree format 2
+
+- The prose-decision check works line by line: an entry citing one question no longer hides a second
+  decision left in prose on another line.
+- The session briefing says when the last handoff leaves a decision in prose with no question asked, and
+  to ask it now (catch-up sessions rarely load `ygg:handoff`, where that rule lived).
+
 ## 0.5.10 (2026-10-23), tree format 2
 
 - A refused `ygg new` says nothing was written (trial 27 took the refusal for a half-made note and tried to
