@@ -1354,6 +1354,12 @@ def run_states(vault):
     return found
 
 
+def waiting(r):
+    """Whether an ended run still waits to be looked at: nothing mentions it, and it was logged since the
+    last handoff or for a note (whose run stays expected across handoffs)."""
+    return not r["dropped"] and not r["seen"] and (r["recent"] or bool(r["note"]))
+
+
 def needs_action(vault, found):
     """Lines for runs that need someone: ended runs that nothing mentions yet, if logged since the last
     handoff or for a note not done (whenever logged), and running ones whose logs have gone quiet."""
@@ -1412,9 +1418,7 @@ def cmd_runs(a):
         n = vault.resolve(a.note)
         found = [r for r in found if r["note"] == n.stem or r["id"] in n.body]
     elif not a.all:
-        found = [r for r in found if r["state"] == "running" or (not r["dropped"] and (
-                 (r["recent"] and not r["seen"])
-                 or (r["note"] in vault.nodes and vault.nodes[r["note"]].status != "done")))]
+        found = [r for r in found if r["state"] == "running" or waiting(r)]
     if not found:
         print("No runs%s." % ("" if a.all or a.note else " running or waiting to be looked at (`--all` for every run)"))
         return
