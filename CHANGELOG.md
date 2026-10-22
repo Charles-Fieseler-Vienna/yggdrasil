@@ -5,6 +5,13 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
+## 0.5.7 (2026-10-23), tree format 2
+
+- `ygg sync` may fill in `dateCreated` and `completedDate` missing from a done note (one made in Obsidian)
+  without `check` calling it changed; changing them is still refused.
+- `ygg log --on NOTE` without `--ask` points to `--for NOTE`, which ties an entry to a note.
+- Tests for `ygg sync` and `ygg schema`.
+
 ## 0.5.6 (2026-10-23), tree format 2
 
 - The `ygg:tree` skill passes note bodies on stdin (`--body - <<'EOF'`) rather than through fixed scratch

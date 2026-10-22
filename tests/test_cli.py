@@ -70,6 +70,36 @@ def test_question_evidence_claim(populated, ygg):
     assert "in no project yet" in out
 
 
+def test_sync_fills_in_what_obsidian_leaves_out(populated, ygg):
+    q = populated / "tree" / "QUE - Is the head wave driven at the head.md"
+    text = q.read_text(encoding="utf-8")
+    stripped = re.sub(r"(?m)^(dateCreated|dateModified|completedDate):.*\n|^projects:\n(  - .*\n)*", "", text)
+    assert stripped != text
+    q.write_text(stripped, encoding="utf-8")
+    _, out = ygg("sync")
+    assert "1 notes synced" in out
+    synced = q.read_text(encoding="utf-8")
+    assert '  - "[[test-project]]"' in synced and "dateCreated:" in synced and "completedDate:" in synced
+    _, out = ygg("sync")
+    assert "0 notes synced" in out
+    _, out = ygg("check")
+    assert "0 errors" in out
+    commit(populated, "synced")
+    q.write_text(re.sub(r"dateCreated: .*", "dateCreated: 2020-01-01T00:00:00+00:00", synced), encoding="utf-8")
+    _, out = ygg("check", ok=False)
+    assert "was done at HEAD and has been changed" in out
+
+
+def test_schema_export(ygg, tmp_path):
+    _, out = ygg("schema")
+    data = json.loads(out)
+    names = {t["name"] for t in data["nodeTypes"]}
+    assert {"Question", "Claim", "Evidence", "Source", "Dataset"} <= names
+    assert data["discourseRelations"] and len(data["templates"]) == len(names)
+    _, out = ygg("schema", "--out", tmp_path / "s.json")
+    assert json.loads((tmp_path / "s.json").read_text(encoding="utf-8")) == data
+
+
 def test_claim_needs_evidence(tree, ygg, tmp_path):
     ygg("new", "question", "Q one", "--body", body(tmp_path, "## Question\n\nq\n"))
     ygg("set", "test-project", "--add-root", "Q one")
@@ -153,6 +183,8 @@ def test_log_for_a_note_without_a_run(populated, ygg):
     assert (populated / "NOTEBOOK.md").read_text().rstrip().endswith("about [[CLM - Head bending is continuously driven]]")
     _, out = ygg("log", "fit", "--log", "fit.log", ok=False)
     assert "--log describes a run" in out
+    _, out = ygg("log", "picked it", "--tag", "decision", "--on", "Head bending", ok=False)
+    assert "use --for NOTE" in out
 
 
 def log_run(ygg, text, *args):

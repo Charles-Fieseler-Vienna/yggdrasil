@@ -24,7 +24,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-__version__ = "0.5.6"  # the tool; keep .claude-plugin/plugin.json in step
+__version__ = "0.5.7"  # the tool; keep .claude-plugin/plugin.json in step
 # The tree format. Bump it when a tree written by this ygg could fail the checks of an older one, and
 # teach `ygg init` to upgrade older trees; ygg.json records each tree's format as spec_version.
 SPEC_VERSION = 2  # 2: notes in no project are allowed (a warning, not an error)
@@ -97,6 +97,7 @@ OWN_FIELDS = set().union(*TYPE_FIELDS.values())
 LIST_FIELDS = {"data", "figures", "projects"}
 # Fields that may change on a done note: generated, or bumped by the plugins.
 UNFROZEN_FIELDS = {"projects", "dateModified", "out-of-scope"}
+FILLED_FIELDS = {"dateCreated", "completedDate"}  # filled in by sync where missing
 OUT = "out-of-scope"  # true on a note that belongs in another tree; it moves out at compression
 
 DG_PLUGIN = "discourse-graphs"
@@ -699,7 +700,8 @@ def frozen_errors(vault):
         if parts[0].startswith(("D", "R")) or cur is None:
             errs.append("%s: was done at HEAD and has been deleted or renamed" % parts[1])
             continue
-        strip = lambda raw: {k: v for k, v in raw.items() if k not in UNFROZEN_FIELDS}
+        filled = {k for k in FILLED_FIELDS if k not in old_raw}  # `ygg sync` may add these, not change them
+        strip = lambda raw: {k: v for k, v in raw.items() if k not in UNFROZEN_FIELDS | filled}
         if strip(old_raw) != strip(cur.raw) or old_body.strip() != cur.body.strip():
             errs.append("%s: was done at HEAD and has been changed; supersede it instead" % parts[1])
     try:
@@ -1551,7 +1553,8 @@ def cmd_log(a):
         text = (text + "\n\n" if text else "") + "- [ ] ask %s%s · %s" % (qid, links, question)
         tag = tag or "ask"
     elif a.on or a.blocks:
-        die("--on and --blocks describe a question for the user; add --ask")
+        die("--on and --blocks describe a question for the user (add --ask QUESTION); to tie an entry to a "
+            "note it is about, use --for NOTE")
     if not text:
         die("give the entry as an argument, or with --body FILE (or - for stdin)")
     head = append_entry(vault.root, tag, text)
