@@ -5,6 +5,11 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
+## 0.5.6 (2026-10-23), tree format 2
+
+- The `ygg:tree` skill passes note bodies on stdin (`--body - <<'EOF'`) rather than through fixed scratch
+  files such as `/tmp/evd.md`, which sessions and parallel subagents shared and could overwrite.
+
 ## 0.5.5 (2026-10-23), tree format 2
 
 - An answer from the user is shown in full up to 1500 characters in the report and the session briefing,

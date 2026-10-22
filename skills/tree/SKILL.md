@@ -20,7 +20,9 @@ Exceptions: the prose of a **project** note in `ideas/` (Summary, Findings, othe
 edited with Edit; change its `roots` with `ygg set`. `NOTEBOOK.md` is appended to with `ygg log`, and its past
 entries are never edited.
 
-To write a node's body, put its Markdown sections in a scratch file and pass `--body FILE` (or `--body -`).
+To write a node's body, pass its Markdown sections on stdin, `ygg new ... --body - <<'EOF'` … `EOF` (the same
+for `ygg set`, and `ygg log --body -`), rather than through a file such as `/tmp/evd.md`, which a session or
+subagent running alongside may overwrite.
 
 Trees are text only. Never add figures, PDFs or data; reference them as `repository@commit:path` or an
 absolute cluster path.
