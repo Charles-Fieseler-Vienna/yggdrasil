@@ -9,6 +9,7 @@ tree's `ygg.json`) changes only when a tree written by a new ygg could fail the 
 
 - Compression moves out of the `ygg:tree` skill into its own `ygg:compress` skill, and `ygg:handoff` no
   longer repeats the tree skill's notebook rules: about 1.8 KB less for every session to load.
+- `ygg show` leaves out the Obsidian plugin's `nodeTypeId` and `nodeInstanceId`, which mean nothing to a reader.
 
 ## 0.5.2 (2026-10-22), tree format 2
 

@@ -1063,7 +1063,8 @@ def describe(n):
 def cmd_show(a):
     vault = open_vault(a)
     n = vault.resolve(a.note, ("node", "project"))
-    print(n.path.read_text(encoding="utf-8").rstrip())
+    # the Obsidian plugin's ids mean nothing to a reader
+    print(re.sub(r"(?m)^node(Type|Instance)Id:.*\n", "", n.path.read_text(encoding="utf-8")).rstrip())
     if n.type == "project":
         members = defaultdict(list)
         for stem, ps in vault.membership().items():

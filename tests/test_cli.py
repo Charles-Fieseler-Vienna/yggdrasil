@@ -61,6 +61,7 @@ def test_question_evidence_claim(populated, ygg):
     _, out = ygg("show", "Head bending")
     assert "is supported by [[EVD - Innovations travel down the body]]" in out
     assert "addresses [[QUE - Is the head wave driven at the head]]" in out
+    assert "nodeInstanceId" not in out and "nodeTypeId" not in out and "confidence:" in out
     _, out = ygg("show", "test-project")
     assert out.count("\n- ") == 4
 
