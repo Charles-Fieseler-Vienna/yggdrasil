@@ -24,7 +24,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-__version__ = "0.4.1"  # the tool; keep .claude-plugin/plugin.json in step
+__version__ = "0.5.0"  # the tool; keep .claude-plugin/plugin.json in step
 # The tree format. Bump it when a tree written by this ygg could fail the checks of an older one, and
 # teach `ygg init` to upgrade older trees; ygg.json records each tree's format as spec_version.
 SPEC_VERSION = 2  # 2: notes in no project are allowed (a warning, not an error)
@@ -987,6 +987,11 @@ def cmd_set(a):
     n = vault.resolve(a.note, ("node", "project"))
     scope_only = (a.out_of_scope or a.in_scope) and not any(
         v for k, v in vars(a).items() if k not in ("note", "out_of_scope", "in_scope", "func", "cmd", "vault"))
+    priority_only = a.priority and not any(
+        v for k, v in vars(a).items() if k not in ("note", "priority", "func", "cmd", "vault"))
+    if priority_only and n.status == "done":
+        die("[[%s]] is done and frozen, and a done note is on no priority list (`ygg report`, the session hook "
+            "and the web app list only notes not done), so its priority no longer matters" % n.stem)
     if not scope_only:
         n = editable(vault, a.note, ("node", "project"))
     if n.type == "project":
@@ -1065,6 +1070,12 @@ def cmd_show(a):
         for i, (stem, via, how, judged) in hits:
             print("- %s: %s (%s)" % (i["id"], i["title"], judged or ("affected" if via is None else
                                                                       "%s [[%s]]; to judge" % (how, via))))
+    asks = [q for q in all_asks(vault.root) if not q["answer"] and n.stem in q["on"] + q["blocks"]]
+    if asks:
+        print("\n<!-- questions waiting on the user (generated) -->")
+        for q in asks:
+            print("- %s: %s (%s)" % (q["id"], q["question"], "blocked until answered" if n.stem in q["blocks"]
+                                     else "about this note"))
 
 
 # --- To-dos and issues -----------------------------------------------------------------
@@ -1082,8 +1093,24 @@ def cmd_show(a):
 # notebook entry names both the issue id and the note. `ygg resolve ID -m "what was done"` closes the
 # issue: it appends an entry ending in `resolved i261022-1` and ticks the issue's box (either one closes it).
 # Open issues are listed by the report and the session hook, until resolved.
+#
+# A question for the user is a decision only they can make (scope, a definition, go or no-go):
+# `ygg log TEXT --ask QUESTION --on NOTE --blocks NOTE` ends the entry with
+#   - [ ] ask a261022-1 · on [[CLM - X]] · blocks [[EVD - Y]] · Adopt the new definition?
+# where `on` names what the question is about and `blocks` the work waiting for the answer. The user answers
+# with `ygg answer ID -m TEXT` (or in the web app, which runs it): an entry ending in `answered a261022-1`,
+# and the box ticked. Open questions lead the report, the session hook and the web app's Overview; answers
+# since the last handoff are shown to the next session, which acts on them.
 
 TODO_RE = re.compile(r"^[ \t]*[-*] \[([ xX])\] (.+)$", re.M)
+ASK_LINE_RE = re.compile(r"^[ \t]*(?:[-*] \[([ xX])\] )?ask (a\d{6}-\d+)((?: · (?:on|blocks) [^·\n]*?)*) · (.+)$", re.M)
+ANSWERED_LINE_RE = re.compile(r"^answered ((?:a\d{6}-\d+(?:, )?)+)$", re.M)
+# Prose that leaves a decision to the user ("You: accept or reject X", "your call", "awaiting the user"),
+# which belongs in a question instead, so it waits where the user looks and is not lost between handoffs.
+USER_DECISION_RE = re.compile(
+    r"^[ \t]*(?:[-*] )?(?:\*\*)?(?:you|user)(?:\*\*)?(?:\b[^\n]{0,15})?:|\byour (?:call|decision|go[ /-]?ahead)\b"
+    r"|\b(?:awaiting|waiting (?:on|for)) (?:the )?user\b|\buser'?s (?:call|decision)\b|\bfor you to decide\b|\b(?:decision|question)s? for (?:you|the user)\b"
+    r"|\b(?:accept|approve) or reject\b|\bgo/no-go\b", re.I | re.M)
 ISSUE_LINE_RE = re.compile(r"^[ \t]*(?:[-*] \[([ xX])\] )?issue (i\d{6}-\d+)(?: · affects (.*))?$", re.M)
 RESOLVED_LINE_RE = re.compile(r"^resolved ((?:i\d{6}-\d+(?:, )?)+)$", re.M)
 
@@ -1118,12 +1145,12 @@ def all_issues(root):
 
 
 def all_todos(root):
-    """Every to-do line in the notebook, oldest first: {text, done, when, entry}. Issue lines are left
-    to all_issues."""
+    """Every to-do line in the notebook, oldest first: {text, done, when, entry}. Issue and question lines
+    are left to all_issues and all_asks."""
     out = []
     for i, e in enumerate(notebook_entries(root)):
         for m in TODO_RE.finditer(e["text"]):
-            if not ISSUE_LINE_RE.match(m.group(0)):
+            if not ISSUE_LINE_RE.match(m.group(0)) and not ASK_LINE_RE.match(m.group(0)):
                 out.append({"text": m.group(2).strip(), "done": m.group(1) != " ", "when": e["when"], "entry": i})
     return out
 
@@ -1146,7 +1173,8 @@ def tick(root, match):
 
 def cmd_tick(a):
     vault = open_vault(a)
-    line = tick(vault.root, lambda l: a.text.lower() in l.lower() and not ISSUE_LINE_RE.match(l))
+    line = tick(vault.root, lambda l: a.text.lower() in l.lower() and not ISSUE_LINE_RE.match(l)
+                and not ASK_LINE_RE.match(l))
     print("ticked: %s" % line.replace("[ ]", "[x]", 1))
     if a.note:
         print("%s: %s" % (NOTEBOOK, append_entry(vault.root, "done", "%s\n\nDone: %s" % (
@@ -1266,6 +1294,99 @@ def cmd_resolve(a):
             tick(vault.root, lambda l, iid=iid: bool(ISSUE_LINE_RE.match(l)) and (" %s" % iid) in l)
 
 
+def new_ask_id(root):
+    base = "a%s-" % datetime.date.today().strftime("%y%m%d")
+    taken = {q["id"] for q in all_asks(root)}
+    k = 1
+    while base + str(k) in taken:
+        k += 1
+    return base + str(k)
+
+
+def all_asks(root):
+    """Every question for the user in the notebook, oldest first: {id, question, on, blocks (stems), when,
+    entry, context (the entry's first line), answer (text, or None while open), answered (when, or None),
+    answer_entry (the answer's entry, by index)}."""
+    entries = notebook_entries(root)
+    out = []
+    for i, e in enumerate(entries):
+        for m in ASK_LINE_RE.finditer(e["text"]):
+            parts = {"on": [], "blocks": []}
+            for part in m.group(3).split(" · ")[1:]:
+                key, _, names = part.partition(" ")
+                parts[key] += [unlink_name(x.strip()) for x in names.split(",") if x.strip()]
+            first = (e["text"].splitlines() or [""])[0]
+            out.append({"id": m.group(2), "question": m.group(4).strip(), "on": parts["on"],
+                        "blocks": parts["blocks"], "when": e["when"], "entry": i,
+                        "context": "" if ASK_LINE_RE.match(first) else first[:200],
+                        "answer": "(box ticked)" if (m.group(1) or " ") != " " else None, "answered": None})
+    for i, e in enumerate(entries):
+        for m in ANSWERED_LINE_RE.finditer(e["text"]):
+            for x in m.group(1).split(","):
+                for q in out:
+                    if q["id"] == x.strip():
+                        q["answer"], q["answered"] = ANSWERED_LINE_RE.sub("", e["text"]).strip(), e["when"]
+                        q["answer_entry"] = i
+    return out
+
+
+def asks_answered_since_handoff(root):
+    """The questions answered after the last handoff (by position: entries in the handoff's minute may
+    come before or after it): the next session is to act on them."""
+    hand = [i for i, e in enumerate(notebook_entries(root)) if "handoff" in e["tag"].lower()]
+    return [q for q in all_asks(root) if q["answered"] and (not hand or q["answer_entry"] > hand[-1])]
+
+
+def describe_ask(q):
+    links = "".join(" · %s %s" % (k, ", ".join("[[%s]]" % x for x in q[k])) for k in ("on", "blocks") if q[k])
+    lines = ["- %s (%s): %s%s" % (q["id"], q["when"], q["question"], links)]
+    if q["answer"]:
+        lines.append("  answered%s: %s" % (" " + q["answered"] if q["answered"] else "",
+                                           " ".join(q["answer"].split())[:300]))
+    return lines
+
+
+def print_asks(root, cap=None):
+    """The report's first groups: the questions waiting on the user, and those answered since the handoff."""
+    waiting = [q for q in all_asks(root) if not q["answer"]]
+    if waiting:
+        print("## Waiting on the user (%d)" % len(waiting))
+        print("\n".join(l for q in waiting[:cap] for l in describe_ask(q)))
+        print()
+    answered = asks_answered_since_handoff(root)
+    if answered:
+        print("## Answered since the last handoff (%d): act on these" % len(answered))
+        print("\n".join(l for q in answered for l in describe_ask(q)))
+        print()
+
+
+def cmd_asks(a):
+    vault = open_vault(a)
+    asks = all_asks(vault.root)
+    if not a.all:
+        asks = [q for q in asks if not q["answer"]]
+    if not asks:
+        print("No questions waiting on the user%s." % ("" if a.all else " (`--all` lists answered ones too)"))
+        return
+    for q in asks:
+        print("\n".join(describe_ask(q)))
+
+
+def cmd_answer(a):
+    vault = open_vault(a)
+    known = {q["id"]: q for q in all_asks(vault.root)}
+    if a.id not in known:
+        die("no question %s in the notebook (`ygg asks --all` lists them)" % a.id)
+    if known[a.id]["answer"]:
+        die("%s is answered already; a change of mind is a new notebook entry" % a.id)
+    text = (a.text or "").strip()
+    if not text:
+        die("give the answer with -m TEXT")
+    head = append_entry(vault.root, "answer", "%s\n\nanswered %s" % (text, a.id))
+    tick(vault.root, lambda l: bool(ASK_LINE_RE.match(l)) and (" %s " % a.id) in l)
+    print("%s: %s" % (NOTEBOOK, head))
+
+
 # --- Notebook --------------------------------------------------------------------
 # NOTEBOOK.md at the tree's root is the project's lab notebook: dated entries, appended and never
 # edited, newest last. ygg only appends to it (`ygg log`), reads entry headings and checks its links; the
@@ -1342,7 +1463,7 @@ def notebook_warnings(vault):
 def cmd_log(a):
     vault = open_vault(a)
     text = (a.text or "").strip() or (read_body(a.body).strip() if a.body else "")
-    if not text and not a.todo:
+    if not text and not a.todo and not a.ask:
         die("give the entry as an argument, or with --body FILE (or - for stdin)")
     tag = "handoff" if a.handoff else (a.tag or "").strip()
     if a.todo:
@@ -1356,11 +1477,9 @@ def cmd_log(a):
         if bad:
             die("PIDs are numbers, and no PID, job or log may contain ',' or ' · ': %s" % ", ".join(bad))
         note = vault.resolve(a.note).stem if a.note else None
-        for pid in a.pid:
-            if pid_state(pid) == "ended":
-                warn("PID %s is not running here; if it runs elsewhere (another machine, outside a sandbox), "
-                     "log it from there or as --job" % pid)
-        logs = [log_path(vault.root, x) for x in a.log]
+        found = [log_path(vault.root, x) for x in a.log]
+        logs = [stored for stored, _ in found]
+        a.pid = check_pids(a.pid, [full for _, full in found])
         rid = new_run_id(vault.root, a.pid, a.job)
         text += "\n\n" + run_line(rid, a.pid, a.job, logs, note)
         tag = tag or "run"
@@ -1374,7 +1493,30 @@ def cmd_log(a):
         tag = tag or "issue"
     elif a.affects:
         die("--affects names what an issue undermines; add --issue")
+    qid = None
+    if a.ask:
+        question = " ".join(a.ask.split())
+        if not question:
+            die("--ask needs the question")
+        links = "".join(" · %s %s" % (key, ", ".join(wikilink(vault.resolve(x).stem) for x in names))
+                        for key, names in (("on", a.on), ("blocks", a.blocks)) if names)
+        qid = new_ask_id(vault.root)
+        text = (text + "\n\n" if text else "") + "- [ ] ask %s%s · %s" % (qid, links, question)
+        tag = tag or "ask"
+    elif a.on or a.blocks:
+        die("--on and --blocks describe a question for the user; add --ask")
+    if not text:
+        die("give the entry as an argument, or with --body FILE (or - for stdin)")
     head = append_entry(vault.root, tag, text)
+    # not when the entry asks, or refers to a question already waiting (by id, or as "the question")
+    asked = qid or re.search(r"\ba\d{6}-\d+\b", text) or (
+        re.search(r"\bquestion", text, re.I) and any(not q["answer"] for q in all_asks(vault.root)))
+    hit = None if asked else USER_DECISION_RE.search(text)
+    if hit:
+        line = next(l for l in text.splitlines() if hit.group(0).strip() in l).strip()
+        warn("this entry leaves a decision to the user in prose (%r). Ask it as a question, so it waits for "
+             "them in the report, the session briefing and the web app, where they answer it: "
+             "`ygg log \"the context\" --ask \"...?\" --on NOTE --blocks NOTE`" % line[:100])
     names = set(vault.nodes) | set(vault.projects)
     for target in inline_links(text):
         if target not in names:
@@ -1385,6 +1527,9 @@ def cmd_log(a):
         issue = next(i for i in issue_states(open_vault(a)) if i["id"] == iid)
         print("issue id: %s (`ygg issues %s` lists what rests on it; `ygg resolve %s` closes it)" % (iid, iid, iid))
         print("\n".join(describe_issue(issue)[1:]))
+    if qid:
+        print("question id: %s (it waits on the user, in the report, the session hook and the web app; "
+              "`ygg answer %s -m TEXT` answers it)" % (qid, qid))
 
 
 def append_entry(root, tag, text):
@@ -1437,10 +1582,10 @@ def run_line(rid, pids, jobs, logs, note, host=None):
 
 def log_path(root, name):
     """A log path as given to `ygg log` (relative to where it ran, or failing that to the repository's top,
-    as when ygg runs inside the tree's folder), stored relative to the tree's repository so it means the
-    same on every clone, or absolute if outside it."""
+    as when ygg runs inside the tree's folder), as (stored, full): stored relative to the tree's repository
+    so it means the same on every clone, or absolute if outside it."""
     if name.startswith("~"):
-        return name
+        return name, Path(name).expanduser()
     try:
         top = Path(git(root, "rev-parse", "--show-toplevel").strip())
     except (subprocess.CalledProcessError, OSError):
@@ -1453,9 +1598,82 @@ def log_path(root, name):
     elif not full.exists():
         warn("log %s does not exist yet" % full)
     try:
-        return os.path.normpath(full.resolve().relative_to(top.resolve()).as_posix())
+        return os.path.normpath(full.resolve().relative_to(top.resolve()).as_posix()), full
     except ValueError:
-        return str(full.resolve())
+        return str(full.resolve()), full
+
+
+def check_pids(pids, logs):
+    """The PIDs to log for a run. A PID that has ended, or that is the shell running this very command
+    (`pgrep -f PATTERN` finds that shell, and `$!` after `setsid` is a process that forks and exits), is
+    replaced by the processes writing the run's logs, where /proc can tell; otherwise kept, with a warning."""
+    mine = ancestors()
+    out = []
+    for pid in pids:
+        wrong = ("is the shell running this command" if int(pid) in mine else
+                 "is not running here" if pid_state(pid) == "ended" else None)
+        if not wrong:
+            out.append(pid)
+            continue
+        found = [w for w in writers(logs) if w not in mine]
+        if found:
+            warn("PID %s %s; logging PID %s instead, the process writing %s"
+                 % (pid, wrong, ", ".join(map(str, found)), ", ".join(str(x) for x in logs)))
+            out += [str(w) for w in found if str(w) not in out]
+        else:
+            warn("PID %s %s, and no process here is writing the run's logs; give the run's own PID (`$!` "
+                 "right after `nohup CMD > LOG &`), or if it runs elsewhere (another machine, outside a "
+                 "sandbox), log it from there or as --job" % (pid, wrong))
+            out.append(pid)
+    return list(dict.fromkeys(out))
+
+
+def ancestors():
+    """The PIDs of this process's parent, its parent, and so on, from /proc (empty without it)."""
+    out, pid = set(), os.getppid()
+    while pid > 1 and pid not in out:
+        out.add(pid)
+        try:
+            pid = int((PROC / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()[1])
+        except (OSError, IndexError, ValueError):
+            break
+    return out
+
+
+def writers(logs):
+    """The processes with any of these files open, from /proc, leaving out those whose parent has it open
+    too (a run's children inherit its output): the run itself, or the leader of the session it was started
+    in by setsid. Empty where /proc cannot tell."""
+    want = set()
+    for f in logs:
+        try:
+            want.add(os.path.realpath(f))
+        except OSError:
+            pass
+    holders = {}
+    for d in PROC.glob("[0-9]*") if want else []:
+        try:
+            if any(os.path.realpath(fd) in want for fd in (d / "fd").iterdir()):
+                holders[int(d.name)] = proc_stat(d.name)
+        except (OSError, IndexError, ValueError):
+            continue
+    out = []
+    mine = proc_stat("self")[3]
+    for p, (_, parent, _, session) in sorted(holders.items()):
+        if parent in holders:
+            continue
+        # launched with setsid: the session's leader (say `bash -c 'fit; plot'`) runs as long as the whole job
+        if session != mine and session != p and pid_state(session) == "running":
+            p = session
+        if p not in out:
+            out.append(p)
+    return out
+
+
+def proc_stat(pid):
+    """(state, parent, process group, session) of a process, from /proc."""
+    f = (PROC / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()
+    return f[0], int(f[1]), int(f[2]), int(f[3])
 
 
 def new_run_id(root, pids, jobs):
@@ -1814,7 +2032,8 @@ def cmd_report(a):
     changed = lambda n: str(n.meta.get("dateModified") or "")[:16].replace("T", " ") >= since
     loose = [n for n in sorted(vault.nodes.values(), key=lambda n: n.stem) if n.stem not in members]
     out = [n for n in nodes + [n for n in loose if n not in nodes] if n.meta.get(OUT)]
-    here = [n for n in nodes if not n.meta.get(OUT)]  # the work of this tree
+    gone = superseded(vault)
+    here = [n for n in nodes if not n.meta.get(OUT) and n.stem not in gone]  # the work of this tree
     groups = [
         ("High priority, not done", [n for n in here if n.meta.get("priority") == "high" and n.status != "done"]),
         ("In progress", [n for n in here if n.status == "in-progress"]),
@@ -1824,11 +2043,13 @@ def cmd_report(a):
         ("Claims at low confidence", [n for n in here if n.type == "claim" and n.meta.get("confidence") == "low"]),
         ("In no project", [n for n in loose if not n.meta.get(OUT)]),
         ("Out of scope here, to move out at compression", out),
+        ("Superseded, not done", [n for n in nodes if n.stem in gone and n.status != "done"]),
     ]
     if since:
         groups.append(("Changed since %s" % since, sorted((n for n in nodes if changed(n)),
                                                           key=lambda n: str(n.meta.get("dateModified")))))
     cap = None if a.all else LIST_CAP
+    print_asks(vault.root, cap)
     for title, group in groups:
         if not group:
             continue
@@ -2256,12 +2477,21 @@ def node_flags(vault):
     return flags
 
 
+def superseded(vault):
+    """The stems of notes another note supersedes: their work is over, whatever their status says."""
+    return {d.stem for rel, s, d in vault.edges() if rel == "supersedes"}
+
+
 def agenda(vault):
     """{stem: [reasons]} for the notes a new session is pointed at first (the SessionStart hook lists them,
-    and the web app's "What the agent sees first" shows them): in progress, high priority and not done, or
-    named in the last handoff, whose text the session reads."""
+    and the web app's "What the agent sees first" shows them): in progress, high priority and not done,
+    named in the last handoff, whose text the session reads, or under a question the user answered since.
+    Those whose work waits on an open question are marked "waiting on the user"."""
     out = defaultdict(list)
+    gone = superseded(vault)
     for n in sorted(vault.nodes.values(), key=lambda n: n.stem):
+        if n.stem in gone:
+            continue
         if n.status == "in-progress":
             out[n.stem].append("in progress")
         if n.meta.get("priority") == "high" and n.status != "done":
@@ -2271,6 +2501,14 @@ def agenda(vault):
         stem = unlink_name(name.strip())
         if stem in vault.nodes and "named in the last handoff" not in out[stem]:
             out[stem].append("named in the last handoff")
+    for q in asks_answered_since_handoff(vault.root):
+        for stem in q["on"] + q["blocks"]:
+            if stem in vault.nodes and "answered by the user" not in out[stem]:
+                out[stem].append("answered by the user")
+    for q in all_asks(vault.root):
+        for stem in q["blocks"] if not q["answer"] else []:
+            if stem in out and "waiting on the user" not in out[stem]:
+                out[stem].append("waiting on the user")
     return dict(out)
 
 
@@ -2391,7 +2629,21 @@ def main(argv=None):
                    "that may undermine results in the tree, open until `ygg resolve`")
     p.add_argument("--affects", action="append", default=[], help="a note the issue undermines, e.g. a Dataset "
                    "or run Source (repeatable); what rests on it is listed to judge")
+    p.add_argument("--ask", metavar="QUESTION", help="ask the user a question only they can decide (scope, a "
+                   "definition, go or no-go), open until `ygg answer`")
+    p.add_argument("--on", action="append", default=[], help="a note the question is about (repeatable)")
+    p.add_argument("--blocks", action="append", default=[], help="a note whose work waits for the answer "
+                   "(repeatable)")
     p.set_defaults(func=cmd_log)
+
+    p = sub.add_parser("asks", help="list the questions waiting on the user")
+    p.add_argument("--all", action="store_true", help="answered ones too, with their answers")
+    p.set_defaults(func=cmd_asks)
+
+    p = sub.add_parser("answer", help="answer a question for the user (`ygg asks` lists them)")
+    p.add_argument("id", help="the question's id")
+    p.add_argument("--text", "-m", required=True, help="the answer, and why")
+    p.set_defaults(func=cmd_answer)
 
     p = sub.add_parser("issues", help="list open issues and what rests on the notes they affect")
     p.add_argument("target", nargs="?", help="one issue id, listed in full")

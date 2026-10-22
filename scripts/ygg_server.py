@@ -41,8 +41,8 @@ RECENT_ENTRIES = 8
 
 
 def overview_json(ygg, vault):
-    """Where the work stands, from the same functions the agent's briefing and `ygg report` use: the agent's
-    list, open to-dos and issues, runs that need someone, the last handoff and recent notebook entries, and
+    """Where the work stands, from the same functions the agent's briefing and `ygg report` use: the
+    questions waiting on the user and those answered since the handoff, the agent's list, open to-dos and issues, runs that need someone, the last handoff and recent notebook entries, and
     the briefing itself, word for word as the SessionStart hook gives it."""
     root = vault.root
     entries = ygg.notebook_entries(root)
@@ -54,6 +54,9 @@ def overview_json(ygg, vault):
                          for stem, via, how, judged in i["notes"] if not judged],
                "judged": sum(1 for n in i["notes"] if n[3]), "affects": i["affects"]}
               for i in ygg.issue_states(vault) if not i["resolved"]]
+    ask = lambda q: {"id": q["id"], "question": q["question"], "context": q["context"], "when": q["when"],
+                     "answer": q["answer"], "answered": q["answered"],
+                     **{k: [{"stem": x, "id": by_stem.get(x)} for x in q[k]] for k in ("on", "blocks")}}
     try:
         hook = SourceFileLoader("ygg_session_start", str(HOOK)).load_module()
         briefing = "\n".join(hook.summary(ygg, root, root))
@@ -62,6 +65,8 @@ def overview_json(ygg, vault):
     return {"agenda": [{"id": by_stem[s], "stem": s, "why": why} for s, why in sorted(ygg.agenda(vault).items())],
             "todos": [t for t in ygg.all_todos(root) if not t["done"]],
             "issues": issues,
+            "asks": [ask(q) for q in ygg.all_asks(root) if not q["answer"]],
+            "answered": [ask(q) for q in ygg.asks_answered_since_handoff(root)],
             "runs": ygg.runs_summary(found), "needs_action": ygg.needs_action(vault, found),
             "handoff": hand[-1] if hand else None,
             "entries": [{"when": e["when"], "tag": e["tag"], "first": (e["text"].splitlines() or [""])[0][:160]}
@@ -77,11 +82,15 @@ def graph_json(ygg, vault):
             for stem, via, how, judged in i["notes"]:
                 if not judged:
                     issues.setdefault(stem, []).append({"id": i["id"], "title": i["title"]})
+    asks = {}  # stem -> open questions for the user about it, or blocking it
+    for q in ygg.all_asks(vault.root):
+        for stem in (q["on"] + q["blocks"]) if not q["answer"] else []:
+            asks.setdefault(stem, []).append({"id": q["id"], "question": q["question"], "blocks": stem in q["blocks"]})
     old = {d.stem for rel, s, d in vault.edges() if rel == "supersedes"}
     first = ygg.agenda(vault)
     nodes = [{"id": n.uid, "stem": n.stem, "title": n.content, "type": n.type, "status": n.status,
               "confidence": n.meta.get("confidence"), "outcome": n.meta.get("outcome"),
-              "flag": flags.get(n.stem), "issues": issues.get(n.stem, []), "superseded": n.stem in old,
+              "flag": flags.get(n.stem), "issues": issues.get(n.stem, []), "asks": asks.get(n.stem, []), "superseded": n.stem in old,
               "agenda": first.get(n.stem, []),
               "projects": [ygg.unlink_name(p) for p in n.meta.get("projects") or []],
               "file": n.path.relative_to(vault.root).as_posix(),
@@ -133,6 +142,11 @@ class Done(BaseModel):
 
 
 class Tick(BaseModel):
+    text: str
+
+
+class Answer(BaseModel):
+    id: str
     text: str
 
 
@@ -214,6 +228,10 @@ def create_app(ygg, root, token):
     @api.post("/todos/tick")
     def tick_todo(q: Tick):
         return {"message": tree.run("tick", q.text)}
+
+    @api.post("/asks/answer")
+    def answer_ask(q: Answer):
+        return {"message": tree.run("answer", q.id, "-m", q.text)}
 
     @api.get("/notes/{uid}")
     def get_note(uid: str):

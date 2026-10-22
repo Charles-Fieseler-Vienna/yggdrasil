@@ -26,6 +26,7 @@ export const api = {
   unlink: (id) => call("DELETE", "relations/" + encodeURIComponent(id)),
   overview: () => call("GET", "overview"),
   tick: (text) => call("POST", "todos/tick", { text }),
+  answer: (id, text) => call("POST", "asks/answer", { id, text }),
 };
 
 // Calls onVersion(version) now and whenever the tree changes on disk; reconnects by itself.

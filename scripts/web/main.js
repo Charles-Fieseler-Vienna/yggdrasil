@@ -204,10 +204,13 @@ function App() {
 
   const action = async (kind, value, id = selected) => {
     if (kind === "connect") return setConnectFrom(selected);
-    if (kind === "priority" || kind === "tick") {
+    if (kind === "priority" || kind === "tick" || kind === "answer") {
       try {
-        if (kind === "tick") await api.tick(value); else await api.setFields(id, { priority: value });
-        await changed({ message: kind === "tick" ? "Ticked: " + value : "Priority set to " + value + "." });
+        if (kind === "tick") await api.tick(value);
+        else if (kind === "answer") await api.answer(value.id, value.text);
+        else await api.setFields(id, { priority: value });
+        await changed({ message: kind === "tick" ? "Ticked: " + value : kind === "answer"
+          ? "Answered " + value.id + ", in the notebook for the next session." : "Priority set to " + value + "." });
       } catch (err) {
         setToast({ text: err.message, error: true });
       }

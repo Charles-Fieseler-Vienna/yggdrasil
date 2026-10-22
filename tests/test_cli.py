@@ -458,12 +458,49 @@ def test_log_paths_are_stored_relative_to_the_repository(tree):
     sub = tree / "analysis"
     sub.mkdir()
     (sub / "fit.log").write_text("x")
-    _, out = run("--vault", tree, "log", "fit", "--pid", str(os.getpid()), "--log", "fit.log",
-                 "--log", "/abs/elsewhere.log", cwd=sub)
+    child = subprocess.Popen(["sleep", "30"])
+    try:
+        _, out = run("--vault", tree, "log", "fit", "--pid", str(child.pid), "--log", "fit.log",
+                     "--log", "/abs/elsewhere.log", cwd=sub)
+    finally:
+        child.kill()
     assert "log /abs/elsewhere.log does not exist yet" in out
     assert "· logs analysis/fit.log, /abs/elsewhere.log" in (tree / "NOTEBOOK.md").read_text()
     _, out = run("--vault", tree, "log", "x", "--pid", "999999999", cwd=tree)
     assert "is not running here" in out
+
+
+@pytest.mark.skipif(not os.path.exists("/proc/self/fd"), reason="needs /proc")
+def test_log_finds_the_process_writing_the_log(tree):
+    """`pgrep -f` finds the agent's own shell, and `$!` after setsid has exited: ygg logs the log's writer."""
+    log = tree / "fit.log"
+    with log.open("w") as f:
+        fit = subprocess.Popen(["sleep", "30"], stdout=f)
+    try:
+        gone = subprocess.Popen(["true"])
+        gone.wait()
+        _, out = run("--vault", tree, "log", "fit", "--pid", str(gone.pid), "--log", "fit.log", cwd=tree)
+        assert "PID %d is not running here; logging PID %d instead" % (gone.pid, fit.pid) in out
+        assert "run id: r%s-%d" % (time.strftime("%y%m%d"), fit.pid) in out
+        p = subprocess.run(["sh", "-c", 'exec 3>&-; "$0" "$1" --vault "$2" log shell --pid $$ --log fit.log',
+                            sys.executable, str(ROOT / "scripts" / "ygg"), str(tree)], cwd=tree,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
+        assert "is the shell running this command; logging PID %d instead" % fit.pid in p.stdout
+        book = (tree / "NOTEBOOK.md").read_text()
+        assert book.count("· pids %d ·" % fit.pid) == 2
+        # two steps under setsid: the session's leader runs until both are done, so it is the run
+        job = subprocess.Popen(["setsid", "sh", "-c", "sleep 30 > step1.log; sleep 1"], cwd=str(tree))
+        try:
+            time.sleep(0.5)
+            _, out = run("--vault", tree, "log", "job", "--pid", str(gone.pid), "--log", "step1.log", cwd=tree)
+            assert "logging PID %d instead" % job.pid in out
+        finally:
+            subprocess.run(["pkill", "-s", str(job.pid)])
+        # with no process writing the log, the PID is kept, with advice
+        _, out = run("--vault", tree, "log", "x", "--pid", str(gone.pid), "--log", "other.log", cwd=tree)
+        assert "no process here is writing the run's logs" in out and "`$!`" in out
+    finally:
+        fit.kill()
 
 
 def test_todos_are_task_lines_ticked_in_place(populated, ygg):
@@ -545,6 +582,17 @@ def test_agenda_is_what_a_session_is_pointed_at(populated, ygg):
     assert first == {"QUE - Next question": ["high priority", "named in the last handoff"],
                      "QUE - Parked question": ["in progress"],
                      "CLM - Head bending is continuously driven": ["named in the last handoff"]}
+    # a superseded note's work is over: it leaves the agenda and the report's work lists
+    ygg("new", "question", "Next question, sharper", "--link", "supersedes:Next question", "--link",
+        "follows-from:Head bending")
+    first = y.agenda(y.Vault(populated))
+    assert first["QUE - Next question"] == ["named in the last handoff"]
+    code, out = ygg("set", "Head bending is continuously driven", "--priority", "none", ok=False)
+    assert code and "its priority no longer matters" in out and "supersedes" not in out
+    _, out = ygg("report")
+    work = out.split("## Superseded, not done")[0]
+    assert "[[QUE - Next question]]" not in work and "[[QUE - Next question, sharper]]" in work
+    assert "[[QUE - Next question]] (open)" in out.split("## Superseded, not done (1)")[1]
 
 
 def test_watch_flags_nan_losses_not_every_nan():
@@ -564,3 +612,61 @@ def test_a_log_path_given_from_the_tree_folder_falls_back_to_the_repository(tmp_
     _, out = run("log", "fit", "--pid", "1", "--log", "results/fit.log", cwd=root)
     assert "using" in out and "from the repository's top" in out
     assert "logs results/fit.log" in (root / "NOTEBOOK.md").read_text()
+
+
+def test_questions_for_the_user_wait_until_answered(populated, ygg):
+    today = time.strftime("%y%m%d")
+    ygg("new", "evidence", "Neural test of the new basis")
+    _, out = ygg("log", "Steering passes only under a new definition.", "--ask", "Adopt the new definition?",
+                 "--on", "Head bending", "--blocks", "Neural test")
+    qid = "a%s-1" % today
+    assert "question id: %s" % qid in out
+    book = (populated / "NOTEBOOK.md").read_text()
+    assert ("- [ ] ask %s · on [[CLM - Head bending is continuously driven]] · blocks "
+            "[[EVD - Neural test of the new basis]] · Adopt the new definition?" % qid) in book
+    ygg("log", "--ask", "Go on to Stage 5?")
+    # a question is not a to-do, and tick leaves it alone
+    _, out = ygg("report")
+    assert out.startswith("## Waiting on the user (2)") and "## To do" not in out
+    code, out = ygg("tick", "Adopt", ok=False)
+    assert code and "no open to-dos match" in out
+    _, out = ygg("show", "Neural test")
+    assert "%s: Adopt the new definition? (blocked until answered)" % qid in out
+    ygg("new", "question", "Next", "--priority", "high")
+    y = load_module()
+    ygg("log", "Next: [[EVD - Neural test of the new basis]]", "--handoff")
+    assert y.agenda(y.Vault(populated))["EVD - Neural test of the new basis"] == ["named in the last handoff",
+                                                                                  "waiting on the user"]
+    _, out = ygg("answer", qid, "-m", "Yes, but report both definitions.")
+    assert "— answer" in out
+    book = (populated / "NOTEBOOK.md").read_text()
+    assert "- [x] ask %s" % qid in book and book.rstrip().endswith("answered %s" % qid)
+    _, out = ygg("asks")
+    assert qid not in out and "Go on to Stage 5?" in out
+    _, out = ygg("report")
+    assert "## Answered since the last handoff (1): act on these" in out
+    assert re.search(r"  answered \d{4}-\d\d-\d\d \d\d:\d\d: Yes, but report both definitions\.", out)
+    first = y.agenda(y.Vault(populated))
+    assert "answered by the user" in first["CLM - Head bending is continuously driven"]
+    assert "waiting on the user" not in first["EVD - Neural test of the new basis"]
+    code, out = ygg("answer", qid, "-m", "No.", ok=False)
+    assert code and "answered already" in out
+    code, out = ygg("log", "x", "--blocks", "Neural test", ok=False)
+    assert code and "add --ask" in out
+    ygg("log", "done for today", "--handoff")
+    _, out = ygg("report")
+    assert "Answered since" not in out
+    # a decision left to the user in prose is flagged; one asked, or citing a question, is not
+    for text in ("Next\n- [ ] read the logs\n- You: accept or reject the new definition",
+                 "decision: no Stage 5, still awaiting user acceptance", "**Decision for you:** redefine it?"):
+        _, out = ygg("log", text, "--handoff")
+        assert "leaves a decision to the user in prose" in out and "--ask" in out
+    for text in ("You were right about the cache; fixed it.", "Still waiting on %s." % qid,
+                 "- Your decision (now a question in the report): Stage 5"):
+        _, out = ygg("log", text)
+        assert "leaves a decision" not in out
+
+
+def load_module():
+    from importlib.machinery import SourceFileLoader
+    return SourceFileLoader("ygg_asks", str(ROOT / "scripts" / "ygg")).load_module()

@@ -85,6 +85,10 @@ def test_session_start_lists_open_issues_and_todos(tmp_path):
     out = hook("session_start.py", {"cwd": str(root)})
     assert "Open issue i" in out and "Bad frames in two recordings." in out
     assert "1 open to-do in the notebook" in out
+    run("--vault", root, "log", "--ask", "Drop the bad recordings?")
+    out = hook("session_start.py", {"cwd": str(root)})
+    assert "Waiting on the user (don't start what they block; `ygg asks`):\n  - a" in out
+    assert "Drop the bad recordings?" in out and "1 open to-do" in out
 
 
 def test_session_start_mentions_uncommitted_tree_changes(tmp_path):

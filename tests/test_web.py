@@ -98,5 +98,18 @@ def test_page_shows_and_edits_the_tree(server):
         page.click(".superseded-chip")
         page.wait_for_timeout(1000)
         assert page.locator(".note.superseded").count() == 1
+        # a question for the user: first in the overview, a badge on its note, answered from the page
+        ygg("log", "--ask", "Adopt the new definition?", "--on", "Head bending")
+        page.click("text=Overview")
+        page.wait_for_selector(".overview .ask textarea", timeout=10000)
+        assert page.locator(".note .ask-badge").count() == 1
+        assert page.inner_text(".overview h3 >> nth=0").lower().startswith("waiting on you")
+        page.fill(".overview .ask textarea", "Yes, and report both.")
+        page.click(".overview .ask button")
+        page.wait_for_function("() => !document.querySelector('.overview .ask')", timeout=10000)
+        book = (tree / "NOTEBOOK.md").read_text()
+        assert "Yes, and report both.\n\nanswered a" in book and "- [x] ask a" in book
+        assert "answered since the last handoff" in page.inner_text(".panel").lower()
+        assert page.locator(".note .ask-badge").count() == 0
         browser.close()
         assert errors == []

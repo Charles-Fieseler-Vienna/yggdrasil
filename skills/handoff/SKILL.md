@@ -28,7 +28,9 @@ project's tree (the folder with `ygg.json`, e.g. `research/tree`), or pass `--va
 3. **Set priorities.** `ygg set NOTE --priority high` on the one to three things that should happen next;
    lower ones that went cold (`--priority low`, or `none` to take a note off the web app's frontier). Tick
    the to-dos that got done (`ygg tick TEXT`), and check the open issues (`ygg issues`): resolve those fully
-   judged, and say in the handoff which notes are still to judge.
+   judged, and say in the handoff which notes are still to judge. A decision left for the user is a question
+   (`ygg log "context" --ask "..." --on NOTE --blocks NOTE`), not a "your call" in the handoff's prose; act on
+   the answers given since the last handoff (the report lists them) and cite their ids.
 4. **Write the handoff entry** with `ygg log --handoff --body FILE`, short and concrete:
    - where things stand, in two or three sentences;
    - runs: each one still going, by its run id (`ygg runs` lists them), with where output will land;
@@ -46,13 +48,16 @@ project's tree (the folder with `ygg.json`, e.g. `research/tree`), or pass `--va
 
 1. `ygg report --since handoff` (add `--project P` in a tree with several projects), and read the last
    handoff entry and everything after it in `NOTEBOOK.md`.
-2. `git log` in the project repository since the handoff date.
+2. `git log` in the project repository since the handoff date. If the last handoff leaves a decision to the
+   user in prose ("your call", "User: decide ...") and `ygg asks` has no question for it, ask it now
+   (`ygg log "context" --ask "..." --on NOTE --blocks NOTE`), once, so it waits where the user looks.
 3. Check the runs: `ygg runs` lists those still running or not looked at, with their logs, and the report's
    **Needs action** group says which ended, which went quiet, and which Evidence waits for them. Read the
    end of the logs. Cluster jobs and runs on other hosts are not checked: ask the user, don't assume. To be
    told when runs end, start `ygg watch` in the background.
 4. Brief the user in a few lines: what was running and its state now; the next steps from the handoff and the
-   high-priority notes; open to-dos and issues; what changed since; anything weak or blocked worth knowing.
+   high-priority notes; questions waiting on the user, and answers to act on; open to-dos and issues; what
+   changed since; anything weak or blocked worth knowing.
    Suggest the web app (`ygg serve`: its Overview shows the same, and the Frontier filter the ways forward)
    for the picture.
 
@@ -63,6 +68,7 @@ When working in a project, append decisions, dead ends and surprises to the note
 about: `ygg log "what and why" --pid N --log PATH` (repeat for a sweep; `--job ID` for a cluster job;
 `--for NOTE` when it serves an existing note). Cite its run id where its result ends up, or in a notebook
 line; give up runs with `ygg drop ID -m "why"` (`--kill` to stop them). Note small next steps as to-dos
-(`ygg log "..." --todo "..."`), and a problem in data or code as an issue (`--issue --affects NOTE`; see the
-`ygg:tree` skill). Never edit or reorder past entries, except ticking a to-do with `ygg tick`; correct one
+(`ygg log "..." --todo "..."`), a problem in data or code as an issue (`--issue --affects NOTE`), and a
+decision only the user can make as a question (`--ask "..." --on NOTE --blocks NOTE`; see the `ygg:tree`
+skill). Never edit or reorder past entries, except ticking a to-do with `ygg tick`; correct one
 with a new entry. The plugin's hook reminds you after commits and launches.

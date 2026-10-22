@@ -36,9 +36,9 @@ def nudge(event):
         return ("This command looks like it started a run, in a repository with a ygg tree. If it is a run, log "
                 "it now: `ygg log \"<what and why>\" --pid <pid> --log <path>` (repeat --pid and --log for a "
                 "sweep; --job <id> for a cluster job; --for NOTE if a node for it exists). The PID is `$!` right "
-                "after a `&` (`pgrep -f` also lists your own shell). It prints a run id: cite it wherever the "
-                "result is recorded. "
-                "To wait, run `ygg watch` in the background rather than a loop of your own: it returns when logged "
+                "after `nohup CMD > LOG &`; given --log, ygg replaces a PID that has exited or is your own "
+                "shell (`setsid` forks, `pgrep -f` finds the shell) with the process writing the log. It "
+                "prints a run id: cite it wherever the result is recorded. To wait, run `ygg watch` in the background rather than a loop of your own: it returns when logged "
                 "runs end, with the end of their logs, and reports failures on the way; "
                 "`ygg drop ID -m why` gives a run up.")
     book = trees[0] / "NOTEBOOK.md"

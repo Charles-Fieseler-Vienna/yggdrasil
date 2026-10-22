@@ -103,6 +103,13 @@ not, write a notebook line naming the issue id and the note with the reason
 (`ygg log "i261022-1: [[EVD - ...]] uses no Hilbert features"`). `ygg impact NOTE` shows what rests on any
 note. When nothing is left to judge, `ygg resolve ID -m "how"`.
 
+**A decision only the user can make** (scope, a definition, go or no-go on a result that sits on its bar):
+make the judgment calls you can, and log them as decisions; ask the rest as a question, at once, naming the
+notes it is about and the work it holds up: `ygg log "the context in two sentences" --ask "Adopt X?" --on
+"CLM - ..." --blocks "EVD - ..."`. It waits on the user in the report, the session briefing and the web app,
+where they answer it; don't restate it in handoffs or start the work it blocks. Answers since the last
+handoff are listed first (`ygg asks --all` shows every one): act on them, citing the question id.
+
 **Papers** use `ygg:paper` (one paper as a Source plus what it means here) or `ygg:digest` (a whole paper
 broken into questions, claims and evidence). **Brainstorming** uses `ygg:brainstorm`; starting a project from
 the main tree uses `ygg:seed`.

@@ -5,6 +5,30 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
+## 0.5.0 (2026-10-22), tree format 2
+
+- Questions for the user: decisions only the user can make (scope, a definition, go or no-go), as notebook
+  lines with an id, `- [ ] ask a261022-1 · on [[X]] · blocks [[Y]] · QUESTION`, written with
+  `ygg log --ask QUESTION --on NOTE --blocks NOTE`. `ygg asks` lists them; `ygg answer ID -m TEXT` answers
+  one in a new entry and ticks its box. Open questions lead `ygg report`, the session briefing and the web
+  app's Overview, where each has a box to answer it (the one notebook entry the web app writes); notes they
+  are about or block carry a badge, and the **Waiting on you** filter finds them. Answers since the last
+  handoff are listed for the next session to act on, and their notes join the agent's list.
+- `ygg log` warns when an entry, a handoff above all, leaves a decision to the user in prose ("You: accept or
+  reject ...", "your call") instead of asking it with `--ask`.
+
+## 0.4.2 (2026-10-22), tree format 2
+
+- `ygg report` leaves superseded notes out of its work lists (high priority, in progress, open, unanswered
+  questions, weak claims) and lists those not done in their own group; the session hook's agenda and the web
+  app's "What the agent sees first" leave them out too.
+- `ygg log --pid` replaces a wrong PID with the process writing the run's log: one that has exited (`$!`
+  after `setsid`, which forks) or is the shell running the command (what `pgrep -f PATTERN` finds first).
+  Runs were logged with such PIDs and showed as ended while still running. For a job started with `setsid`
+  (`setsid nohup bash -c 'fit; plot'`), it is the session's leader, which runs until every step is done.
+- `ygg set --priority` on a done note says that a done note is on no priority list, rather than advising
+  a superseding note.
+
 ## 0.4.1 (2026-10-22), tree format 2
 
 - `ygg watch` prints the last lines of each log when a run ends (`--tail N`, 5 by default; a progress bar

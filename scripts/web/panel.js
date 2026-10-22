@@ -19,6 +19,29 @@ function renderBody(md) {
   return DOMPurify.sanitize(marked.parse(linked));
 }
 
+// A question waiting on the user, with a box to answer it: `ygg answer ID -m TEXT`, in the notebook, where
+// the next session finds it.
+function Ask({ q, link, onAction, here }) {
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const names = (key, label) => (q[key] && q[key].length ? html`<span className="muted"> · ${label} ${q[key].map((x, i) =>
+    html`${i ? ", " : ""}${link(x.id, x.stem)}`)}</span>` : null);
+  const send = async () => {
+    setSending(true);
+    await onAction("answer", { id: q.id, text: text.trim() });
+    setSending(false);
+  };
+  return html`
+    <div className="ask">
+      <p><span className="ask-badge">?</span> <b>${q.question}</b></p>
+      ${here ? html`<p className="muted">${q.id}: ${q.blocks ? "the work on this note waits for your answer" : "about this note"}</p>`
+        : html`<p className="muted">${q.id}, ${q.when}${q.context ? ": " + q.context : ""}${names("on", "on")}${names("blocks", "blocks")}</p>`}
+      <textarea value=${text} placeholder="Your answer, and why" onInput=${(e) => setText(e.target.value)} />
+      <div className="ask-actions"><span className="muted">goes into the notebook</span>
+        <button disabled=${!text.trim() || sending} onClick=${send}>Answer</button></div>
+    </div>`;
+}
+
 // With nothing selected and no filter: where the work stands, as the agent is told it (the same lists the
 // SessionStart briefing and `ygg report` give), and the briefing itself.
 function Overview({ G, onReveal, onAction }) {
@@ -37,6 +60,12 @@ function Overview({ G, onReveal, onAction }) {
   return html`
     <aside className="panel overview">
       <h2>Where things stand</h2>
+      ${o.asks.length ? section("Waiting on you", o.asks.length, html`${o.asks.map((q) =>
+        html`<${Ask} key=${q.id} q=${q} link=${link} onAction=${onAction} />`)}`) : null}
+      ${o.answered.length ? section("Answered since the last handoff", o.answered.length, html`
+        <ul className="entries">${o.answered.map((q) => html`<li key=${q.id}><b>${q.question}</b><br />
+          <span className="muted">${q.answered || ""}</span> ${q.answer}</li>`)}</ul>
+        <p className="muted">The next session is told these, and acts on them.</p>`) : null}
       ${section("What the agent sees first", o.agenda.length, o.agenda.length ? html`
         <ul className="match-list">${o.agenda.map((a) => {
           const n = G.byId.get(a.id);
@@ -135,6 +164,7 @@ export function Panel({ G, id, matches, onReveal, onFocus, onAction, onUnlink })
       ${n.issues.length ? html`<div className="issues">${n.issues.map((i) => html`
         <p key=${i.id}><span className="issue-badge">!</span> <b>${i.id}</b> ${i.title}: to judge whether this still
           holds (rerun and supersede, or note it unaffected in the notebook with the issue id).</p>`)}</div>` : null}
+      ${n.asks.map((q) => html`<${Ask} key=${q.id} q=${q} here=${true} onAction=${onAction} link=${() => null} />`)}
       <dl className="fields">
         ${fields.filter(([, v]) => v).map(([k, v]) => html`<dt key=${k + "t"}>${k}</dt><dd key=${k}>${v}</dd>`)}
       </dl>

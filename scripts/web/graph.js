@@ -115,6 +115,7 @@ export function downPath(s, from, to) {
 // Filters that show only some notes, each with the path up to its root for context; a `restrict` filter
 // instead shows only its notes, cut loose from the rest (see structure).
 export const FILTERS = {
+  asks: { label: "Waiting on you", test: (n) => n.asks.length > 0 },
   agenda: { label: "What the agent sees first", test: (n) => n.agenda.length > 0 },
   frontier: { label: "Frontier: the ways forward", restrict: true,
               test: (n) => ["open", "gap"].includes(n.flag) && !n.superseded && n.meta.priority !== "none" },

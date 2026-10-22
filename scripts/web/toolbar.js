@@ -37,7 +37,7 @@ export function Toolbar({ G, project, setProject, hiddenTypes, toggleType, filte
   return html`
     <header className="toolbar">
       <strong className="vault">${G.vault}</strong>
-      <button onClick=${onOverview} title="Where things stand: the agent's list, to-dos, issues, runs, the last handoff">Overview</button>
+      <button onClick=${onOverview} title="Where things stand: questions waiting on you, the agent's list, to-dos, issues, runs, the last handoff">Overview</button>
       <select value=${project} onChange=${(e) => setProject(e.target.value)} title="Only this project's notes">
         <option value="">All projects</option>
         ${G.projects.map((p) => html`<option key=${p.id} value=${p.id}>${p.title}</option>`)}
@@ -69,7 +69,7 @@ export function Toolbar({ G, project, setProject, hiddenTypes, toggleType, filte
       <button onClick=${onFit}>Fit</button>
       <button onClick=${onNewRoot} title="A new question that is a root of a project">New root question</button>
       <span className="legend">
-        <span className="flag gap">gap</span><span className="flag open">open</span><span className="flag weak">weak</span><span className="flag out">out of scope</span><span className="issue-badge">!</span> open issue <span className="prio-badge">▲</span> high priority
+        <span className="flag gap">gap</span><span className="flag open">open</span><span className="flag weak">weak</span><span className="flag out">out of scope</span><span className="issue-badge">!</span> open issue <span className="prio-badge">▲</span> high priority <span className="ask-badge">?</span> waiting on you
         <span className="hint">ctrl-click folds · alt-click focuses</span>
       </span>
     </header>`;

@@ -70,6 +70,12 @@ def summary(ygg, root, cwd):
     if dirty:
         lines.append("  Uncommitted in the tree: %s. A session may have stopped before recording and committing "
                      "its work: check `git status` and the notebook's latest entries." % dirty)
+    for title, group in (("Waiting on the user (don't start what they block; `ygg asks`)",
+                          [q for q in ygg.all_asks(root) if not q["answer"]]),
+                         ("Answered by the user since the last handoff: act on these",
+                          ygg.asks_answered_since_handoff(root))):
+        if group:
+            lines.append("  %s:\n" % title + "\n".join("  " + l for q in group[:8] for l in ygg.describe_ask(q)))
     issues = [i for i in ygg.issue_states(vault) if not i["resolved"]]
     for i in issues[:5]:
         lines.append("  Open issue " + "\n  ".join(ygg.describe_issue(i))[2:])
