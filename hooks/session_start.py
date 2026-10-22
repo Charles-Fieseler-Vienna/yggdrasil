@@ -87,8 +87,11 @@ def main():
            "Sources and Datasets). Before creating or changing notes, load the ygg:tree skill; change notes "
            "and relations only with the `ygg` command, never by editing tree/, relations.json or ygg.json. "
            "Keep the tree's lab notebook: append decisions, dead ends and surprises as they happen with "
-           "`ygg log \"...\" --tag decision` (or dead-end, run, idea). When the user wraps up, offer the "
-           "ygg:handoff skill; for papers use ygg:paper or ygg:digest.", ""]
+           "`ygg log \"...\" --tag decision` (or dead-end, idea), and log every run you launch with "
+           "`ygg log ... --pid N --log PATH`. When the user wraps up, offer the ygg:handoff skill. When they "
+           "step back to think about what to pursue, use ygg:brainstorm; ygg:seed starts a project's tree "
+           "from questions in another tree, and `ygg compress` brings a project's results back. For papers "
+           "use ygg:paper or ygg:digest.", ""]
     for root in trees:
         out += summary(ygg, root, cwd)
     print("\n".join(out))

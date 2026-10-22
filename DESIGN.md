@@ -286,14 +286,14 @@ What can be checked is checked deterministically, on the run's own host only: wh
 
 There are two ways of working, in two kinds of tree, joined by seeding and compression. They are kept here so that changes to one part of ygg keep both working end to end.
 
-### Brainstorming, in the main tree
+### Brainstorming
 
-Thinking about what to work on, without code: a conversation that ends in notes (`ygg:brainstorm`).
+Thinking about what to work on, without code: a conversation that ends in notes (`ygg:brainstorm`). It happens mostly in the main tree, but also as a break within a project's heavy computation, in the project's tree; "main tree" names how a tree is used, not a different kind of tree, and every tree has the same commands and notebook.
 
 - **Input**: an idea, a result from a project, a paper, a talk. Papers come in as Sources linked to Zotero, with Evidence for what they mean here (`ygg:paper`), or broken down whole when they are to be built on (`ygg:digest`).
 - **Output**: open Questions connected to what is already known, especially across projects; links between existing notes; sometimes a new project note with root questions. No runs and no Evidence of our own, so few Claims.
-- **Rhythm**: occasional sessions, each closed with `ygg check` and a commit. There is no notebook yet (see TODO.md); the notes are the record.
-- **Ends** when a question is ready to pursue: it is seeded into a project's tree.
+- **Rhythm**: occasional sessions, each closed with a `brainstorm` notebook entry (what was considered and set aside, and why; the threads left open), `ygg check` and a commit. The notes are the record of what was kept, the notebook of what was not.
+- **Ends** when a question is ready to pursue: it is seeded into a project's tree. A brainstorm inside a project writes only to the project's tree, even ideas that belong elsewhere; they move out at compression, never during the brainstorm.
 
 ### A coding project, in the project's tree
 
@@ -407,7 +407,7 @@ claude plugin install ygg@yggdrasil
 |---|---|
 | `bin/ygg` | The `ygg` command on Claude's PATH. |
 | `hooks/post_bash.py` | After a Bash command, in a repository with a tree: if it launched a run (`nohup`, `sbatch`, a trailing `&`, a background command...), reminds Claude to log it with its PID, host and logs; if it committed and the notebook has no entry from the last 20 minutes, reminds Claude to log any decision or result. Silent elsewhere. |
-| `hooks/session_start.py` | At session start, looks for a tree at or above the working directory, else up to three levels below it. If it finds one, it adds the rules in brief (load `ygg:tree`, change notes only with `ygg`, keep the notebook, offer a handoff) and where the work stands: counts, in-progress and high-priority notes, the last handoff and how many entries followed it, the runs named since, and a tree in another format. Elsewhere it prints nothing. |
+| `hooks/session_start.py` | At session start, looks for a tree at or above the working directory, else up to three levels below it. If it finds one, it adds the rules in brief (load `ygg:tree`, change notes only with `ygg`, keep the notebook and log runs, offer a handoff, brainstorm, seed and compress) and where the work stands: counts, in-progress and high-priority notes, the last handoff and how many entries followed it, the runs named since, and a tree in another format. Elsewhere it prints nothing. |
 | `ygg:seed` | Starts a project tree from main-tree questions with `ygg seed`, then expands them into sub-questions and planned runs. |
 | `ygg:tree` | The working rules: the one rule, commands and allowed relations, runs, superseding, compression, the notebook, and how to write nodes. |
 | `ygg:paper` | Adds one paper as a Source (from Zotero) and records what it means for a project as Evidence. |

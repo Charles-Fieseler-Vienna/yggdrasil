@@ -12,7 +12,12 @@ words for named concepts).
 
 ## 1. Get oriented, quietly
 
-- `ygg report`, and read the project notes in `ideas/` that seem related.
+- **Which tree**: the one the session is in. In the middle of a project, brainstorming is often a break
+  from the runs, in the project's own tree, and everything from it stays there, even ideas that belong
+  elsewhere; never write to the main tree or another tree from a project brainstorm. Moving notes out is
+  compression's job, later.
+- `ygg report`, the notebook's recent `brainstorm` entries (`grep -n "brainstorm" NOTEBOOK.md`; ideas set
+  aside before should not come back as new), and the project notes in `ideas/` that seem related.
 - Search the tree for the topic: `grep -ril WORD tree/ ideas/`, then `ygg show NOTE` on the hits.
 - Suggest the user open the web app (`ygg serve`, if it is not running: they start it, not you)
   to watch notes appear. Don't dump what you read back at them; use it in your questions.
@@ -58,9 +63,12 @@ When the ideas gather into something to pursue: create the root questions first,
 `ygg new project "Project title" --id short-slug --root "QUE - ..." --body p.md`, where `p.md` has a short
 `## Summary` (the aim, in the user's words) and an empty `## Findings`. Add later roots with
 `ygg set short-slug --add-root NOTE`.
-The project's detailed work later happens in its own repository's tree; this note is its entry point here.
+The project's detailed work later happens in its own repository's tree, started from these questions
+with the `ygg:seed` skill; this note is its entry point here, and its results come back by compression.
 
 ## 5. Close
 
-Run `ygg check` and fix anything you caused. Summarise what was added (new notes, new links, open
-threads worth returning to). Commit only when the user asks.
+Record the session in the notebook, with what did not become notes: `ygg log --tag brainstorm --body FILE`,
+saying in a few lines the ideas considered and set aside (and why), the open threads worth returning to, and
+links to the notes made (`[[QUE - ...]]`). Then run `ygg check` and fix anything you caused, and summarise what
+was added. Commit only when the user asks.

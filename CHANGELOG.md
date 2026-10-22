@@ -5,6 +5,13 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
+## Unreleased
+
+- Every tree keeps a notebook, the main tree too ("main" is how a tree is used, not a kind of tree): run
+  `ygg init` in an older tree to add it. `ygg:brainstorm` ends a session with a `brainstorm` entry of the ideas
+  set aside and the threads left open, and points to `ygg:seed` for a new project.
+- The session hook mentions brainstorming, seeding and compression in every tree.
+
 ## 0.2.0 (2026-10-22), tree format 1
 
 - `ygg seed NOTE --from MAIN`: copy main-tree notes with everything under them into a project tree, each copy

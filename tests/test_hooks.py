@@ -35,6 +35,7 @@ def test_session_start_finds_a_project_tree(tmp_path):
     run("--vault", root, "log", "init is running", "--pid", "1", "--log", "fit.log")
     out = hook("session_start.py", {"cwd": str(tmp_path / "proj")})
     assert "load the ygg:tree skill" in out and "`research/tree`" in out
+    assert "ygg:handoff" in out and "ygg:brainstorm" in out and "ygg:seed" in out
     assert "where we are" in out and "1 notebook entry since" in out
     assert "Runs since the last handoff or still running: 1 running." in out and "`ygg runs`" in out
 
