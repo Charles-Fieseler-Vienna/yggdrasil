@@ -24,7 +24,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-__version__ = "0.5.0"  # the tool; keep .claude-plugin/plugin.json in step
+__version__ = "0.5.1"  # the tool; keep .claude-plugin/plugin.json in step
 # The tree format. Bump it when a tree written by this ygg could fail the checks of an older one, and
 # teach `ygg init` to upgrade older trees; ygg.json records each tree's format as spec_version.
 SPEC_VERSION = 2  # 2: notes in no project are allowed (a warning, not an error)
@@ -303,11 +303,33 @@ class Note:
 
 # --- Vault -------------------------------------------------------------------------
 
+def trees_below(p, depth=3):
+    """Trees in p's subfolders up to depth levels down, skipping hidden and package folders."""
+    found = []
+    for root, dirs, files in os.walk(p):
+        if "ygg.json" in files and Path(root) != p:
+            found.append(Path(root))
+            dirs[:] = []
+            continue
+        level = len(Path(root).relative_to(p).parts)
+        dirs[:] = [] if level >= depth else [x for x in dirs if not x.startswith(".")
+                                             and x not in ("node_modules", "venv", "__pycache__", "site-packages")]
+    return sorted(found)
+
+
 def find_vault(start):
+    """The tree at or above start; else the only tree a few levels below it (as the hooks find it)."""
     p = Path(start).resolve()
     for d in [p] + list(p.parents):
         if (d / "ygg.json").exists():
             return d
+    below = trees_below(p)
+    if len(below) == 1:
+        print("(using the tree in %s)" % os.path.relpath(below[0], p), file=sys.stderr)
+        return below[0]
+    if below:
+        die("no ygg.json in %s or its parents, and several trees below it (%s); pass --vault"
+            % (p, ", ".join(os.path.relpath(b, p) for b in below)))
     die("no ygg.json in %s or its parents; run `ygg init` or pass --vault" % p)
 
 

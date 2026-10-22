@@ -5,6 +5,12 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
+## 0.5.1 (2026-10-22), tree format 2
+
+- Run from a repository whose tree sits in a subfolder (`research/tree`), `ygg` now finds that tree, as the
+  hooks already did, instead of failing with "no ygg.json"; with several trees below, it names them and asks
+  for `--vault`.
+
 ## 0.5.0 (2026-10-22), tree format 2
 
 - Questions for the user: decisions only the user can make (scope, a definition, go or no-go), as notebook

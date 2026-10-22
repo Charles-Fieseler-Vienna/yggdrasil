@@ -35,6 +35,17 @@ def test_vault_goes_before_or_after_the_command(tree):
         assert ", 0 errors" in out
 
 
+def test_tree_found_below_the_working_folder(tree, tmp_path):
+    _, out = run("check", cwd=tmp_path)  # the repository root, with the tree one folder down
+    assert "(using the tree in repo)" in out and ", 0 errors" in out
+    run("init", tmp_path / "other")
+    _, out = run("check", cwd=tmp_path, ok=False)
+    assert "several trees below it (other, repo)" in out
+    (tmp_path / "empty").mkdir()
+    _, out = run("check", cwd=tmp_path / "empty", ok=False)
+    assert "no ygg.json in" in out and "run `ygg init`" in out
+
+
 def test_init_makes_a_valid_tree(tree, ygg):
     for name in ("ygg.json", "relations.json", "NOTEBOOK.md", "ideas/test-project.md", "templates/ygg-claim.md",
                  ".obsidian/plugins/discourse-graphs/data.json"):

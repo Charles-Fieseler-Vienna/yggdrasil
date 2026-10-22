@@ -359,7 +359,7 @@ Superseded notes stay in the tree as record. The web app hides them by default a
 
 ## Tooling
 
-`scripts/ygg` is the only writer of notes and `relations.json` besides the Obsidian plugins' own UIs. It finds its tree by looking for `ygg.json` from the current directory up, or takes `--vault PATH`. The Claude Code plugin puts it on Claude's PATH as `ygg` (`bin/ygg`); for your own shell, `ln -s "$PWD/bin/ygg" ~/.local/bin/ygg`.
+`scripts/ygg` is the only writer of notes and `relations.json` besides the Obsidian plugins' own UIs. It finds its tree by looking for `ygg.json` from the current directory up, else in its subfolders up to three levels down as the hooks do (using the one tree found there, and naming it on stderr; several are an error), or takes `--vault PATH`. The Claude Code plugin puts it on Claude's PATH as `ygg` (`bin/ygg`); for your own shell, `ln -s "$PWD/bin/ygg" ~/.local/bin/ygg`.
 
 It is a [uv](https://docs.astral.sh/uv/) script: its first lines declare Python 3.10+ and the web app's dependencies (FastAPI, uvicorn, watchfiles), and running it directly lets uv provide them. Every command but `serve` is standard library only, so `python3 scripts/ygg ...` also works where uv is missing. `bin/ygg` uses uv only for `serve` and runs everything else on `python3`.
 
