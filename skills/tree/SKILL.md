@@ -57,10 +57,19 @@ type; `blocked-by` among Questions, Claims and Evidence.
 
 ## Workflows
 
-**A run.** When launched: a Source with `--run repository@commit:path` and the Evidence derived from it,
-`--status in-progress`. `run` uses a real commit (`git -C REPO rev-parse --short HEAD`), never a branch; if
-the run used uncommitted code, tell the user rather than citing a commit that doesn't match. When results are
-in: fill in the Evidence body (`ygg set NOTE --body FILE`) and `ygg done` it.
+**Runs.** Log every run when it starts, in the notebook: `ygg log "what and why" --pid N --log PATH`
+(repeat both for a sweep; `--job ID` for a cluster job; `--for NOTE` if it serves a note that exists). It
+prints a run id. Most runs stay in the notebook: when one ends, note its result in a line citing the id
+(`ygg log "r261022-41233: no gain over ridge"`), or give it up with `ygg drop ID -m "why"` (`--kill` stops
+it). When a result matters, record it as a node: a Source with `--run repository@commit:path` and the
+Evidence derived from it, citing the run ids in its Method. `run` uses a real commit (`git -C REPO rev-parse
+--short HEAD`), never a branch; if the run used uncommitted code, tell the user rather than citing a commit
+that doesn't match. `ygg runs` lists runs still going or not looked at; `ygg watch` (in the background)
+returns when they end, reporting failures in their logs.
+
+**Starting a project from the main tree.** `ygg seed NOTE --from MAIN_TREE` in the project's tree copies a
+main-tree question (or claim) and everything under it, each copy recording its `origin`, and makes it a root;
+the `ygg:seed` skill also expands it into concrete sub-questions and planned runs.
 
 **Changing a conclusion.** Never edit a `done` node. Create a new node of the same type with
 `--link supersedes:OLD`, saying what changed and why, then update the project's Findings.
@@ -71,13 +80,17 @@ Then write the compressed nodes: about one Question per figure, one Claim per on
 with its own Evidence derived from the tree Source and the Dataset. Keep generalizable results, dead ends and
 open questions; leave narrow methods in the project tree. Add roots with `ygg set PROJECT --add-root NOTE`.
 The outline's **Papers** list says which papers already have a Source in the main tree (derive from that one;
-never make a second) and which lack a Zotero key or DOI.
+never make a second) and which lack a Zotero key or DOI. **Seeded from this tree** lists the notes copied
+from the main tree with what the project added under them: write those against the original notes, not new
+copies. On a second compression of the same tree, **Since the last compression** lists only the new and
+changed notes, relations and notebook entries, and the outline marks them.
 
 **The notebook.** While working, append decisions, dead ends and surprises as they happen:
 `ygg log "..." --tag decision` (or `dead-end`, `run`, `idea`). At the end of a session use `ygg:handoff`.
 
 **Papers** use `ygg:paper` (one paper as a Source plus what it means here) or `ygg:digest` (a whole paper
-broken into questions, claims and evidence). **Brainstorming** uses `ygg:brainstorm`.
+broken into questions, claims and evidence). **Brainstorming** uses `ygg:brainstorm`; starting a project from
+the main tree uses `ygg:seed`.
 
 **The web app.** `ygg serve` serves a local web app (port 8765) for browsing and editing. It never returns,
 so don't run it yourself in the foreground; the user starts it, and an open page picks up CLI changes at once.

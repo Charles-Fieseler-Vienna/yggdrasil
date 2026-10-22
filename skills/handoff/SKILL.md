@@ -17,9 +17,9 @@ project's tree (the folder with `ygg.json`, e.g. `research/tree`), or pass `--va
    project repository with `git status` and `git log` since the last handoff.
 2. **Distil the notebook into the tree.** Propose a short list to the user, then write what they approve
    with `ygg` (following the `ygg:tree` skill):
-   - a run launched: a Source with `--run repo@commit:path` (a real commit; if the code was uncommitted, say
-     so instead) and its Evidence, `--status in-progress`; job IDs and output paths go in the Source's
-     `--add-data`;
+   - a run whose result matters: a Source with `--run repo@commit:path` (a real commit; if the code was
+     uncommitted, say so instead) and its Evidence, citing the run ids in its Method; output folders go in
+     the Source's `--add-data`. Most runs never get this far, and that is fine;
    - a result in: fill in the Evidence and `ygg done` it, with the outcome; failed and ambiguous ones too;
    - a decision that held: a Claim (claims about methods are claims) with its Evidence; a dead end: Evidence
      with outcome `failed`, saying what would make it worth retrying;
@@ -29,7 +29,9 @@ project's tree (the folder with `ygg.json`, e.g. `research/tree`), or pass `--va
    lower ones that went cold (`--priority low`).
 4. **Write the handoff entry** with `ygg log --handoff --body FILE`, short and concrete:
    - where things stand, in two or three sentences;
-   - what is running: job IDs, where output will land, when it should finish;
+   - runs: each one still going, by its run id (`ygg runs` lists them), with where output will land;
+     and each ended or dropped run since the last handoff that no node records, by id, with its result in a
+     few words ("r261022-41233: no gain, dropped"). That mention is what marks it looked at;
    - next steps, each linking its node (`[[QUE - ...]]`);
    - loose state: uncommitted code, unmerged branches, scratch paths, anything only this session knows.
    Don't repeat what the nodes already say; link them.
@@ -40,8 +42,10 @@ project's tree (the folder with `ygg.json`, e.g. `research/tree`), or pass `--va
 1. `ygg report --since handoff` (add `--project P` in a tree with several projects), and read the last
    handoff entry and everything after it in `NOTEBOOK.md`.
 2. `git log` in the project repository since the handoff date.
-3. For each run the handoff or the in-progress Evidence names, check whether it finished: the job (e.g.
-   `squeue`/`sacct` if on the cluster) or its output path. Don't assume.
+3. Check the runs: `ygg runs` lists those still running or not looked at, with their logs, and the report's
+   **Needs action** group says which ended, which went quiet, and which Evidence waits for them. Read the
+   end of the logs. Cluster jobs and runs on other hosts are not checked: ask the user, don't assume. To be
+   told when runs end, start `ygg watch` in the background.
 4. Brief the user in a few lines: what was running and its state now; the next steps from the handoff and the
    high-priority notes; what changed since; anything weak or blocked worth knowing. Suggest the web app
    (`ygg serve`, with the project selected and the In progress or Not done filter) for the picture.
@@ -49,5 +53,8 @@ project's tree (the folder with `ygg.json`, e.g. `research/tree`), or pass `--va
 ## During a session
 
 When working in a project, append decisions, dead ends and surprises to the notebook as they happen with
-`ygg log "..." --tag decision` (or `dead-end`, `run`, `idea`). Never edit or reorder past entries; correct
-one with a new entry.
+`ygg log "..." --tag decision` (or `dead-end`, `idea`). Log every run you launch, or the user tells you
+about: `ygg log "what and why" --pid N --log PATH` (repeat for a sweep; `--job ID` for a cluster job;
+`--for NOTE` when it serves an existing note). Cite its run id where its result ends up, or in a notebook
+line; give up runs with `ygg drop ID -m "why"` (`--kill` to stop them). Never edit or reorder past
+entries; correct one with a new entry. The plugin's hook reminds you after commits and launches.

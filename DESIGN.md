@@ -48,8 +48,9 @@ The tool:
 yggdrasil/
 ├── .claude-plugin/   # plugin.json and marketplace.json (see Plugin)
 ├── bin/ygg           # the command, put on Claude's PATH by the plugin
-├── hooks/            # the SessionStart hook
-├── skills/           # tree, paper, digest, brainstorm, handoff
+├── hooks/            # the SessionStart and post-Bash hooks
+├── skills/           # tree, seed, paper, digest, brainstorm, handoff
+├── tests/            # pytest: the CLI, the hooks, the web app (optional)
 ├── schema/
 │   └── dg-schema-yggdrasil.json   # the schema as a DG export, for manual import (`ygg schema`)
 ├── scripts/
@@ -136,6 +137,7 @@ outcome: succeeded                      # Evidence
 | `citekey` | Source | Better BibTeX citekey, for citing the paper in writing |
 | `location`, `n_animals`, `n_recordings` | Dataset | |
 | `legacy_ref` | all | where a backfilled note came from, e.g. `"TREE 1.12"` |
+| `origin` | all | `repository@commit:nodeInstanceId` of the note this one was copied from by `ygg seed` |
 
 TaskNotes should be set to identify tasks by property (`taskIdentificationMethod: property`, `taskPropertyName: nodeTypeId`, empty value), so every node is a task and project notes are not, without a `#task` tag. The pipeline-specific fields of `obsidian_kanban_ai` (`harness`, `agent`, `skills`, `model`, `cli_args`) and its extra statuses are not used.
 
@@ -214,6 +216,8 @@ When a project, or a phase of one, is finished, its detailed tree is **compresse
 - A compressed Evidence note typically summarises an investigation that spanned many runs.
 - Compressed Evidence is `derived from` a Source pointing to the detailed tree at a fixed commit, so a new project that needs a detailed method can walk down into it, and from the Dataset it rests on.
 - The project's `roots` list the compressed root nodes.
+- A project seeded from the main tree (see [Seeding](#seeding)) is mapped back: the outline marks the seeded notes, and **Seeded from this tree** lists what the project related to them, to be written against the originals.
+- A tree compressed before is compressed incrementally: the new tree Source supersedes the earlier one, and **Since the last compression** lists the notes, relations and notebook entries that are new or changed since its commit, which the outline also marks.
 - Papers are not copied twice. `ygg compress` lists each paper Source of the project tree with the main tree's Source for the same paper (by Zotero key or DOI), if any; compressed Evidence derives from that one. A paper with neither is flagged, to be looked up in Zotero first.
 
 ## Papers
@@ -242,6 +246,12 @@ A project keeps its detailed tree in its own repository, e.g. `Cosyne_2027/resea
 
 When a project or phase is finished, `ygg compress PATH` (run in the main tree) prints the project tree's outline and records it there as a Source at its current commit. The compressed nodes are then written by hand with the user (see [Compression](#compression)).
 
+## Seeding
+
+Work also flows down: a project usually starts from questions in the main tree. `ygg seed NOTE... --from MAIN` (run in the project's tree) copies those notes and everything under them (the same walk as project membership; `--depth N` takes fewer steps down) and makes them roots of a project there. Copies are new notes, with new ids, carrying `origin: repository@commit:nodeInstanceId`, so the main tree must be committed. Done notes stay done. Relations among the copied notes are copied; links in bodies to notes left behind become plain text. Seeding again reuses notes already copied, and paper Sources with the same Zotero key or DOI, so it can pull in later main-tree work. A `seed` notebook entry records it. The `ygg:seed` skill then expands the seeded questions into sub-questions and planned runs (open Evidence with Purpose and Method).
+
+The main tree is not changed by seeding; [Compression](#compression) maps the results back.
+
 ## Notebook
 
 A project tree has a lab notebook, `NOTEBOOK.md` at its root (made by `ygg init`). It is the raw record under the tree: what was tried, decided, abandoned or guessed, as it happens, before it is settled enough to be a node. Three layers, each a cleaned-up version of the one below:
@@ -252,11 +262,58 @@ A project tree has a lab notebook, `NOTEBOOK.md` at its root (made by `ygg init`
 | Project tree | project repository | the graph of settled results, open questions and runs | when something settles |
 | Main tree | Yggdrasil-charlie | the compressed, generalizable part | at the end of a phase |
 
-Each entry is a `## YYYY-MM-DD HH:MM` heading, optionally `— tag` (`decision`, `dead-end`, `run`, `idea`, `handoff`), and free Markdown that links nodes as `[[...]]`. Entries are appended, newest last, and never edited or reordered; a correction is a new entry. `ygg log` appends one; `ygg check` warns, without failing, about links to notes that do not exist. ygg never rewrites the notebook.
+Each entry is a `## YYYY-MM-DD HH:MM` heading, optionally `— tag` (`decision`, `dead-end`, `run`, `idea`, `handoff`), and free Markdown that links nodes as `[[...]]`. Entries are appended, newest last, and never edited or reordered; a correction is a new entry. ygg appends each entry in one write in append mode, so concurrent writers do not lose entries, and `ygg init` marks `NOTEBOOK.md` `merge=union` in `.gitattributes`, so git merges two machines' appends by keeping both. `ygg log` appends one; `ygg check` warns, without failing, about links to notes that do not exist. ygg never rewrites the notebook.
 
 There is no separate decision log. A decision is first an entry; once it holds, it becomes a Claim (about a method, if it is one) with its Evidence, which may cite the entry's date.
 
 A **handoff** is an entry tagged `handoff`: where things stand, what is running (job IDs, output paths), the next steps as links to nodes, and loose state only the session knows (uncommitted code, scratch paths). Before writing one, the notebook since the last handoff is distilled into the tree: runs, results, decisions and dead ends become nodes, and the next one to three notes get `priority: high`. To catch up, `ygg report --since handoff` lists the high-priority and in-progress notes, the notes changed and the notebook entries since the last handoff. The `ygg:handoff` skill does both. The main tree, being compressed, mostly does without a notebook.
+
+### Runs
+
+Most runs are logged first and only some become nodes; many are dropped after a pivot. A run is therefore recorded in the notebook, not in a node: `ygg log "lag sweep, 1-8 s" --pid 41233 --pid 41240 --log results/lag.log` appends an entry (tagged `run`) ending in one standard line,
+
+```
+run r261022-41233 · pids 41233, 41240 · host lab-ws3 · logs results/lag.log
+```
+
+with the host filled in, `jobs 123456` for cluster jobs (`--job`), and `for [[EVD - ...]]` when the run serves a note that already exists (`--for`). The id (`r` + date + first PID or job) is how everything else refers to the run. A run counts as **looked at** once anything after it mentions its id: a node's body (the Method of the Evidence it became, or a run Source), a later notebook line ("r261022-41233: loss plateaued, nothing new"), or a `dropped` entry; or once its `for` note is done. Only runs since the last handoff are expected to be looked at: the handoff sums up the loose ones, and older runs stay in the notebook as plain record. `ygg drop ID... -m "why"` (with `--kill` to stop its processes here) gives a run up: it appends a `dropped` entry ending in `dropped ID, ...`, after which nothing flags the run.
+
+What can be checked is checked deterministically, on the run's own host only: whether each PID still runs and when each log was last written. A PID is checked through `/proc` where it exists, else `ps` (macOS has no `/proc`), else `kill -0`; a zombie (exited, not reaped) counts as ended, and so does a process that started after the run was logged, since its PID was reused. When nothing can tell, as in a sandbox that hides other processes, the run is "not checkable here", never "ended". Cluster jobs and runs on other hosts are listed, not checked; a container usually has its own hostname, so runs logged inside one count as on another host. `ygg log --pid` warns when the PID is not running where it is logged. Log paths are resolved where `ygg log` runs and stored relative to the tree's repository (absolute when outside it), so they mean the same on every clone. `ygg report` and the session hook give one summary line and a **Needs action** group: an ended run since the last handoff that nothing mentions yet, an ended run whose `for` note is not done (whenever it was logged), and a running one whose logs have been quiet for two hours. `ygg runs` lists the runs still running or waiting to be looked at, with their logs (`--all` for every run, `ygg runs NOTE` for one note's), and `ygg show NOTE` lists a note's runs.
+
+`ygg watch [ID | NOTE ...]` blocks until the logged runs running on this machine (or those named) end, printing one line per event: a run ended, its log printed a failure (a Traceback, an `...Error`, Killed, out of memory, `nan`...; new lines only), or its log went quiet; then the Needs action lines. It is plain output, so any agent harness can run it in the background and be woken when it returns (`--first` to return at the first end, `--timeout HOURS`). It ends with the session that started it; the next session starts it again if runs are still going.
+
+## Workflows
+
+There are two ways of working, in two kinds of tree, joined by seeding and compression. They are kept here so that changes to one part of ygg keep both working end to end.
+
+### Brainstorming, in the main tree
+
+Thinking about what to work on, without code: a conversation that ends in notes (`ygg:brainstorm`).
+
+- **Input**: an idea, a result from a project, a paper, a talk. Papers come in as Sources linked to Zotero, with Evidence for what they mean here (`ygg:paper`), or broken down whole when they are to be built on (`ygg:digest`).
+- **Output**: open Questions connected to what is already known, especially across projects; links between existing notes; sometimes a new project note with root questions. No runs and no Evidence of our own, so few Claims.
+- **Rhythm**: occasional sessions, each closed with `ygg check` and a commit. There is no notebook yet (see TODO.md); the notes are the record.
+- **Ends** when a question is ready to pursue: it is seeded into a project's tree.
+
+### A coding project, in the project's tree
+
+Day-to-day work in a project repository, mostly runs and analyses, with an agent writing code alongside the user.
+
+1. **Seed** the tree from the main-tree question (`ygg seed`), and **expand** it into sub-questions and planned runs, open Evidence saying what to run and what would answer it (`ygg:seed`).
+2. **Work** in sessions: runs (below), notebook entries for decisions, dead ends and surprises as they happen (`ygg log`), and nodes only once something settles. Most of the notebook never becomes nodes. Commits are frequent.
+3. **Hand off** at the end of each session and catch up at the start of the next (`ygg:handoff`): the notebook since the last handoff is distilled into nodes, loose runs are summed up, and the next steps get `priority: high`.
+4. **Compress** at the end of a phase (`ygg compress`, in the main tree): the generalizable results, dead ends and open questions go back up, written against the notes the project was seeded from. A later compression shows only what changed since. New questions from it are brainstorming again.
+
+### The life of a run
+
+Runs are launched and logged first; a node comes later, if at all. Each one ends in one of three ways.
+
+- **Logged**: on launch, `ygg log "lag sweep, 1-8 s" --pid N --log PATH`, with `--for "EVD - ..."` when it was planned as a note (the post-Bash hook reminds an agent that forgets). It prints the run id. `ygg watch` in the background, in any agent harness, returns when runs end and reports failures and quiet logs on the way; a later session sees them in the session hook, `ygg report` and `ygg runs`.
+- **Becomes evidence**, when the result matters: a run Source (`--run repository@commit:path`, the commit the run used) and the Evidence derived from it, its Method citing the run id, then `ygg done`.
+- **Noted**, as most are: one notebook line citing the run id ("r261022-41233: no gain over ridge"), often in the handoff entry.
+- **Dropped**, as many are after a pivot or a bug: `ygg drop ID... -m "why"` (`--kill` stops it), and nothing flags it again. A planned Evidence note that will now never get its result is not left open: finish it with outcome `failed` or `promising-out-of-scope` when the reason is worth knowing, else lower its priority or supersede it with the new plan.
+
+Any mention of the run id after it was logged marks it looked at. Runs nobody mentions are flagged only until the next handoff; after that they stay in the notebook as plain record.
 
 ## Tooling
 
@@ -272,13 +329,18 @@ It is a [uv](https://docs.astral.sh/uv/) script: its first lines declare Python 
 | `ygg set NOTE [...]` | Changes fields or the body of an editable node, or a project's roots. |
 | `ygg done NOTE [--outcome X]` | Finishes and freezes a node. |
 | `ygg show NOTE` | Prints a note with its relations (and a claim's datasets), or a project with its members. |
-| `ygg report [--project P] [--since DATE\|handoff]` | Lists high-priority and in-progress work, open nodes, unanswered questions, low-confidence claims and orphans; with `--since`, also the notes changed and the notebook entries since then. |
-| `ygg log [TEXT] [--tag WORD] [--handoff] [--body FILE]` | Appends a dated entry to the notebook (see [Notebook](#notebook)). |
+| `ygg report [--project P] [--since DATE\|handoff] [--all]` | Lists high-priority and in-progress work, open nodes, unanswered questions, low-confidence claims and orphans; with `--since`, also the notes changed and the notebook entries since then. Kept short: empty groups are left out and each lists its first 8 notes (`--all` for every one); runs get one summary line and a **Needs action** group (see [Runs](#runs)). |
+| `ygg log [TEXT] [--tag WORD] [--handoff] [--body FILE] [--pid N] [--job ID] [--log PATH] [--for NOTE]` | Appends a dated entry to the notebook (see [Notebook](#notebook)); with `--pid` or `--job`, logs a run and prints its id (see [Runs](#runs)). |
+| `ygg runs [NOTE] [--all]` | Lists the runs still running or waiting to be looked at, with their logs. |
+| `ygg drop ID... [-m WHY] [--kill]` | Gives runs up, so nothing flags them again. |
+| `ygg watch [ID\|NOTE...] [--first] [--timeout H]` | Waits for runs to end, printing a line per end, failure or quiet log. |
 | `ygg sync` | Regenerates `projects:` and fills in TaskNotes dates missing from notes made in Obsidian. |
-| `ygg compress PATH [--dry-run]` | Outlines a project tree and records it as a Source at its commit; refuses uncommitted trees. |
+| `ygg compress PATH [--dry-run]` | Outlines a project tree and records it as a Source at its commit; refuses uncommitted trees. Maps seeded notes back and, the second time, lists what changed. |
+| `ygg seed NOTE... --from TREE [--project P] [--depth N] [--dry-run]` | Copies notes and everything under them from another tree into this one (see [Seeding](#seeding)). |
 | `ygg serve [--port N] [--open]` | Serves a local web app for browsing and editing the tree (see [Web app](#web-app)). |
 | `ygg check` | Validates everything; exits 1 on any error. |
 | `ygg schema [--out FILE]` | Prints the schema as a DG export file. |
+| `ygg --version` | Prints the tool version and the tree format it writes. |
 
 Notes are named by filename, by the content after the type prefix, by `nodeInstanceId`, or by any unique part of the filename.
 
@@ -293,7 +355,11 @@ Notes are named by filename, by the content after the type prefix, by `nodeInsta
 - every node is reachable from some project's roots, and `projects:` matches the computed membership;
 - `done` notes are unchanged since `HEAD` (bar `projects:` and `dateModified`), and relations touching them were not removed;
 - `run`, `tree` and `figures` are immutable references; only `.md` files are in `tree/` and `ideas/`;
-- the DG settings hold the ygg types and no sync password, and `ygg.json` matches the tool's spec version.
+- the DG settings hold the ygg types and no sync password, and `ygg.json` is in the tool's tree format.
+
+### Versions
+
+The tool version (`ygg --version`, also in `.claude-plugin/plugin.json`) and the tree format (`spec_version` in `ygg.json`) are separate. The format changes only when a tree written by a new ygg could fail an older one's checks; `ygg init` upgrades a tree in place, and every command warns about a tree in another format (an older one: run `ygg init`; a newer one: update ygg). New optional fields that older versions ignore, like `origin`, do not change the format. `CHANGELOG.md` records both.
 
 ### Web app
 
@@ -340,7 +406,9 @@ claude plugin install ygg@yggdrasil
 | Part | Does |
 |---|---|
 | `bin/ygg` | The `ygg` command on Claude's PATH. |
-| `hooks/session_start.py` | At session start, looks for a tree at or above the working directory, else up to three levels below it. If it finds one, it adds the rules in brief (load `ygg:tree`, change notes only with `ygg`, keep the notebook, offer a handoff) and where the work stands: counts, in-progress and high-priority notes, the last handoff and how many entries followed it. Elsewhere it prints nothing. |
+| `hooks/post_bash.py` | After a Bash command, in a repository with a tree: if it launched a run (`nohup`, `sbatch`, a trailing `&`, a background command...), reminds Claude to log it with its PID, host and logs; if it committed and the notebook has no entry from the last 20 minutes, reminds Claude to log any decision or result. Silent elsewhere. |
+| `hooks/session_start.py` | At session start, looks for a tree at or above the working directory, else up to three levels below it. If it finds one, it adds the rules in brief (load `ygg:tree`, change notes only with `ygg`, keep the notebook, offer a handoff) and where the work stands: counts, in-progress and high-priority notes, the last handoff and how many entries followed it, the runs named since, and a tree in another format. Elsewhere it prints nothing. |
+| `ygg:seed` | Starts a project tree from main-tree questions with `ygg seed`, then expands them into sub-questions and planned runs. |
 | `ygg:tree` | The working rules: the one rule, commands and allowed relations, runs, superseding, compression, the notebook, and how to write nodes. |
 | `ygg:paper` | Adds one paper as a Source (from Zotero) and records what it means for a project as Evidence. |
 | `ygg:digest` | Breaks a whole paper, usually one's own, into Questions, Claims and Evidence derived from it, with its Datasets and the open questions of its Discussion. Given the paper's code repository, it also links the script behind each figure as a run Source at the commit matching the paper, which the figure's Evidence derives from; the outputs are not rerun, so the paper stays the Source of the results. |

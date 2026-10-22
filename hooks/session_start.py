@@ -7,7 +7,7 @@ import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
-SKIP = {".git", "node_modules", ".venv", "venv", "__pycache__", ".obsidian", "tree", "ideas"}
+SKIP = {"node_modules", "venv", "__pycache__", "site-packages"}  # and hidden folders
 HANDOFF_CHARS = 2500
 
 
@@ -27,16 +27,25 @@ def find_trees(cwd):
     return sorted(found)[:3]
 
 
+def load_ygg():
+    plugin = Path(os.environ.get("CLAUDE_PLUGIN_ROOT") or Path(__file__).resolve().parent.parent)
+    return SourceFileLoader("ygg", str(plugin / "scripts" / "ygg")).load_module()
+
+
 def summary(ygg, root, cwd):
     where = os.path.relpath(root, cwd)
     lines = []
+    mismatch = ygg.format_mismatch(ygg.tree_format(root))
+    if mismatch:
+        lines.append("- `%s`: %s." % (where, mismatch))
     try:
         vault = ygg.Vault(root)
     except Exception as e:  # a broken tree still gets the rules
         return ["- `%s`: could not be read (%s); run `ygg --vault %s check`." % (where, e, where)]
     nodes = sorted(vault.nodes.values(), key=lambda n: n.stem)
-    lines.append("- `%s`: %d notes in %d projects (%s)." % (
-        where, len(nodes), len(vault.projects), ", ".join(sorted(vault.projects)) or "none"))
+    lines.append("- `%s`: %d notes in %d project%s (%s)." % (
+        where, len(nodes), len(vault.projects), "" if len(vault.projects) == 1 else "s",
+        ", ".join(sorted(vault.projects)) or "none"))
     running = [n.stem for n in nodes if n.status == "in-progress"]
     high = [n.stem for n in nodes if n.meta.get("priority") == "high" and n.status != "done"]
     for title, group in (("In progress", running), ("High priority", high)):
@@ -56,6 +65,11 @@ def summary(ygg, root, cwd):
     elif entries:
         lines.append("  No handoff yet; the notebook has %d entries, the latest from %s."
                      % (len(entries), entries[-1]["when"]))
+    found = ygg.run_states(vault)
+    line = ygg.runs_summary(found)
+    if line:
+        lines.append("  " + line)
+    lines += ["  " + x for x in ygg.needs_action(vault, found)]
     return lines
 
 
@@ -68,8 +82,7 @@ def main():
     trees = find_trees(cwd)
     if not trees:
         return
-    plugin = Path(os.environ.get("CLAUDE_PLUGIN_ROOT") or Path(__file__).resolve().parent.parent)
-    ygg = SourceFileLoader("ygg", str(plugin / "scripts" / "ygg")).load_module()
+    ygg = load_ygg()
     out = ["This repository holds a ygg research tree (a discourse graph of Questions, Claims, Evidence, "
            "Sources and Datasets). Before creating or changing notes, load the ygg:tree skill; change notes "
            "and relations only with the `ygg` command, never by editing tree/, relations.json or ygg.json. "

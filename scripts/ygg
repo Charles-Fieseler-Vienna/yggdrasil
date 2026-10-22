@@ -16,12 +16,17 @@ import datetime
 import json
 import os
 import re
+import signal
+import socket
 import subprocess
 import sys
 import time
 from collections import defaultdict
 from pathlib import Path
 
+__version__ = "0.2.0"  # the tool; keep .claude-plugin/plugin.json in step
+# The tree format. Bump it when a tree written by this ygg could fail the checks of an older one, and
+# teach `ygg init` to upgrade older trees; ygg.json records each tree's format as spec_version.
 SPEC_VERSION = 1
 
 # --- Schema --------------------------------------------------------------------
@@ -66,6 +71,8 @@ RELATIONS = {
 REL_ID = {r: "relation_ygg_" + r for r in RELATIONS}
 REL_BY_ID = {v: k for k, v in REL_ID.items()}
 ACYCLIC = {"derived-from", "follows-from", "supersedes"}
+# Relations whose source sits under their destination in a project (see Vault.below).
+DOWN = ("follows-from", "addresses", "informs", "supports", "opposes", "supersedes")
 
 STATUSES = ["open", "in-progress", "done"]
 PRIORITIES = ["none", "low", "normal", "high"]
@@ -91,6 +98,7 @@ ZOTERO_RE = re.compile(r"^[A-Z0-9]{8}$")
 DOI_RE = re.compile(r"^10\.\d{4,9}/\S+$")
 DOI_PREFIX_RE = re.compile(r"^(https?://(dx\.)?doi\.org/|doi:)", re.I)
 REF_RE = re.compile(r"^[\w.-]+@[0-9a-f]{7,40}:\S+$")
+ORIGIN_RE = re.compile(r"^([\w.-]+)@[0-9a-f]{7,40}:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$")
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -389,30 +397,34 @@ class Vault:
 
     # --- Project membership ---
 
+    def below(self, starts, depth=None, edges=None):
+        """Stems of `starts` and the notes under them: notes that follow from, address, inform, support,
+        oppose or supersede a note under, and the Sources and Datasets those are derived from. `depth`
+        limits the steps down (derivations do not count as steps)."""
+        up, derived = defaultdict(list), defaultdict(list)
+        for rel, s, d in self.edges() if edges is None else edges:
+            if rel in DOWN:
+                up[d.stem].append(s.stem)
+            elif rel == "derived-from":
+                derived[s.stem].append(d.stem)
+        seen, frontier = {}, [(s, 0) for s in starts]
+        while frontier:
+            stem, k = frontier.pop()
+            if seen.get(stem, k + 1) <= k:
+                continue
+            seen[stem] = k
+            frontier += [(d, k) for d in derived[stem]]
+            if depth is None or k < depth:
+                frontier += [(u, k + 1) for u in up[stem]]
+        return set(seen)
+
     def membership(self):
         """Map node stem -> sorted project stems, walking down from each project's roots."""
         edges = self.edges()
         result = defaultdict(set)
         for pstem, p in self.projects.items():
-            members = set()
-            for r in p.meta.get("roots") or []:
-                n = self.nodes.get(unlink_name(r))
-                if n:
-                    members.add(n.stem)
-            changed = True
-            while changed:
-                changed = False
-                for rel, s, d in edges:
-                    if rel in ("follows-from", "addresses", "informs", "supports", "opposes", "supersedes"):
-                        new = s.stem if d.stem in members else None
-                    elif rel == "derived-from":
-                        new = d.stem if s.stem in members else None
-                    else:
-                        new = None
-                    if new and new not in members:
-                        members.add(new)
-                        changed = True
-            for m in members:
+            roots = [unlink_name(r) for r in p.meta.get("roots") or [] if unlink_name(r) in self.nodes]
+            for m in self.below(roots, edges=edges):
                 result[m].add(pstem)
         return {k: sorted(v) for k, v in result.items()}
 
@@ -509,6 +521,8 @@ def validate_node(n, vault):
         errs.append("zotero must be a Zotero item key (8 capital letters or digits), got %r" % m["zotero"])
     if m.get("doi") and not DOI_RE.match(str(m["doi"])):
         errs.append("doi must be a bare DOI like 10.1234/abcd, got %r" % m["doi"])
+    if m.get("origin") and not ORIGIN_RE.match(str(m["origin"])):
+        errs.append("origin must be repository@commit:nodeInstanceId (written by `ygg seed`), got %r" % m["origin"])
     for k in ("run_start", "run_end"):
         if m.get(k) and not DATETIME_RE.match(str(m[k])):
             errs.append("%s must be an ISO date or datetime" % k)
@@ -685,13 +699,29 @@ def settings_errors(vault):
         errs.append("%s lacks the ygg types %s; run `ygg init` again" % (vault.rel(dg), ", ".join(missing)))
     if data.get("spacePassword"):
         errs.append("%s holds a sync password; turn sync off before committing" % vault.rel(dg))
-    try:
-        version = json.loads((vault.root / "ygg.json").read_text(encoding="utf-8")).get("spec_version")
-    except (OSError, ValueError):
-        version = None
-    if version != SPEC_VERSION:
-        errs.append("ygg.json spec_version is %r, this ygg is %d; run `ygg init` to upgrade" % (version, SPEC_VERSION))
+    version = tree_format(vault.root)
+    msg = format_mismatch(version)
+    if msg:
+        errs.append(msg)
     return errs
+
+
+def tree_format(root):
+    try:
+        return json.loads((Path(root) / "ygg.json").read_text(encoding="utf-8")).get("spec_version")
+    except (OSError, ValueError):
+        return None
+
+
+def format_mismatch(version):
+    """What to do about a tree in another format than this ygg's, or None."""
+    if version == SPEC_VERSION:
+        return None
+    if isinstance(version, int) and version > SPEC_VERSION:
+        return ("this tree is in format %d, newer than this ygg %s (format %d); update ygg before changing it"
+                % (version, __version__, SPEC_VERSION))
+    return "this tree is in format %r and ygg %s writes format %d; run `ygg init` in it to upgrade" % (
+        version, __version__, SPEC_VERSION)
 
 
 def note_errors(n, vault):
@@ -747,7 +777,11 @@ def read_json(path):
 # --- Commands ------------------------------------------------------------------
 
 def open_vault(a):
-    return Vault(a.vault or find_vault(os.getcwd()))
+    root = Path(a.vault or find_vault(os.getcwd()))
+    msg = format_mismatch(tree_format(root))
+    if msg and getattr(a, "cmd", None) != "init":
+        warn(msg)
+    return Vault(root)
 
 
 def read_body(path):
@@ -832,6 +866,11 @@ def cmd_init(a):
     write_json(root / "ygg.json", {"spec_version": SPEC_VERSION})
     if not (root / NOTEBOOK).exists():
         (root / NOTEBOOK).write_text(NOTEBOOK_HEAD, encoding="utf-8")
+    attrs = root / ".gitattributes"  # the notebook is append-only: merge by keeping both sides
+    text = attrs.read_text(encoding="utf-8") if attrs.exists() else ""
+    if NOTEBOOK + " merge=union" not in text:
+        attrs.write_text(text + ("" if not text or text.endswith("\n") else "\n") + NOTEBOOK + " merge=union\n",
+                         encoding="utf-8")
     if not (root / "relations.json").exists():
         write_json(root / "relations.json", {"version": 1, "lastModified": 0, "relations": {}})
     for t in TYPES:
@@ -1004,6 +1043,11 @@ def cmd_show(a):
     if n.type == "claim":
         scope = vault.scope(n)
         print("- established on: %s" % (", ".join(wikilink(s) for s in scope) or "no dataset"))
+    mine = [r for r in run_states(vault) if r["note"] == n.stem or r["id"] in n.body]
+    if mine:
+        print("\n<!-- runs (generated) -->")
+        for r in mine:
+            print("\n".join(describe_run(r)))
 
 
 # --- Notebook --------------------------------------------------------------------
@@ -1052,19 +1096,405 @@ def cmd_log(a):
     if not text:
         die("give the entry as an argument, or with --body FILE (or - for stdin)")
     tag = "handoff" if a.handoff else (a.tag or "").strip()
-    stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    path = vault.root / NOTEBOOK
-    old = path.read_text(encoding="utf-8") if path.exists() else NOTEBOOK_HEAD
-    head = "## %s%s" % (stamp, " — " + tag if tag else "")
-    path.write_text(old.rstrip("\n") + "\n\n" + head + "\n\n" + text + "\n", encoding="utf-8")
+    rid = None
+    if a.pid or a.job:
+        bad = [x for x in a.pid if not x.isdigit()] + [x for x in a.pid + a.job + a.log if "," in x or " · " in x]
+        if bad:
+            die("PIDs are numbers, and no PID, job or log may contain ',' or ' · ': %s" % ", ".join(bad))
+        note = vault.resolve(a.note).stem if a.note else None
+        for pid in a.pid:
+            if pid_state(pid) == "ended":
+                warn("PID %s is not running here; if it runs elsewhere (another machine, outside a sandbox), "
+                     "log it from there or as --job" % pid)
+        logs = [log_path(vault.root, x) for x in a.log]
+        rid = new_run_id(vault.root, a.pid, a.job)
+        text += "\n\n" + run_line(rid, a.pid, a.job, logs, note)
+        tag = tag or "run"
+    elif a.log or a.note:
+        die("--log and --for describe a run; give its --pid (or --job) too")
+    head = append_entry(vault.root, tag, text)
     names = set(vault.nodes) | set(vault.projects)
     for target in inline_links(text):
         if target not in names:
             warn("[[%s]] does not exist" % target)
-    print("%s: %s" % (NOTEBOOK, head[3:]))
+    print("%s: %s%s" % (NOTEBOOK, head, "\nrun id: %s (cite it where the result is recorded)" % rid if rid else ""))
+
+
+def append_entry(root, tag, text):
+    """Append an entry with one write in append mode, so writers running at the same time (a session's
+    `ygg log`, another session) cannot lose each other's entries."""
+    stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    path = Path(root) / NOTEBOOK
+    head = "%s%s" % (stamp, " — " + tag if tag else "")
+    lead = NOTEBOOK_HEAD if not path.exists() else ""
+    if not lead:
+        with path.open("rb") as f:
+            f.seek(max(0, path.stat().st_size - 2))
+            end = f.read()
+        lead = "" if end.endswith(b"\n\n") else "\n" if end.endswith(b"\n") else "\n\n"
+    with path.open("a", encoding="utf-8") as f:
+        f.write(lead + ("\n" if lead == NOTEBOOK_HEAD else "") + "## " + head + "\n\n" + text.strip() + "\n")
+    return head
+
+
+# --- Runs -----------------------------------------------------------------------------
+# Runs are logged in the notebook, as text, by `ygg log TEXT --pid N --log PATH [--for NOTE]`, which ends
+# the entry with one standard line:
+#   run r261022-41233 · pids 41233, 41240 · host lab-ws3 · logs results/a.log, results/b.log · for [[EVD - X]]
+# Most runs never become nodes. A run counts as looked at once anything after it mentions its id (a later
+# entry, a node's body), or its `for` note is done. Only runs since the last handoff are expected to be
+# looked at; the handoff is where loose runs are summed up, and older ones stay in the notebook as they are.
+# A run given up (a pivot, a bug, a better idea) is dropped: `ygg drop ID "why"` appends an entry ending in
+#   dropped r261022-41233, r261022-41240
+# after which nothing flags it, whatever its `for` note.
+
+RUN_LINE_RE = re.compile(r"^run (r\d{6}-j?[\w.-]+) · (.*)$", re.M)
+DROP_LINE_RE = re.compile(r"^dropped ((?:r\d{6}-j?[\w.-]+(?:, )?)+)$", re.M)
+STUCK_HOURS = 2  # a running process whose logs have been quiet this long may be stuck
+HOST = socket.gethostname().split(".")[0]
+
+
+def run_line(rid, pids, jobs, logs, note, host=None):
+    parts = ["run " + rid]
+    if pids:
+        parts.append("pids " + ", ".join(pids))
+    if jobs:
+        parts.append("jobs " + ", ".join(jobs))
+    parts.append("host " + (host or HOST))
+    if logs:
+        parts.append("logs " + ", ".join(logs))
+    if note:
+        parts.append("for " + wikilink(note))
+    return " · ".join(parts)
+
+
+def log_path(root, name):
+    """A log path as given to `ygg log` (relative to where it ran), stored relative to the tree's
+    repository so it means the same on every clone, or absolute if outside it."""
+    if name.startswith("~"):
+        return name
+    path = Path(name)
+    full = path if path.is_absolute() else Path.cwd() / path
+    if not full.exists():
+        warn("log %s does not exist yet" % full)
+    try:
+        top = Path(git(root, "rev-parse", "--show-toplevel").strip())
+    except (subprocess.CalledProcessError, OSError):
+        top = Path(root)
+    try:
+        return os.path.normpath(full.resolve().relative_to(top.resolve()).as_posix())
+    except ValueError:
+        return str(full.resolve())
+
+
+def new_run_id(root, pids, jobs):
+    base = "r%s-%s" % (datetime.date.today().strftime("%y%m%d"), pids[0] if pids else "j" + jobs[0])
+    taken = {r["id"] for r in all_runs(root)}
+    rid, k = base, 2
+    while rid in taken:
+        rid, k = "%s.%d" % (base, k), k + 1
+    return rid
+
+
+def all_runs(root):
+    """Every run logged in the notebook, oldest first: {id, pids, jobs, host, logs, note, entry (index),
+    when}."""
+    out = []
+    for i, e in enumerate(notebook_entries(root)):
+        for m in RUN_LINE_RE.finditer(e["text"]):
+            r = {"id": m.group(1), "pids": [], "jobs": [], "host": None, "logs": [], "note": None, "entry": i,
+                 "when": e["when"]}
+            for part in m.group(2).split(" · "):
+                key, _, val = part.partition(" ")
+                if key in ("pids", "jobs", "logs"):
+                    r[key] = [v.strip() for v in val.split(",") if v.strip()]
+                elif key == "host":
+                    r["host"] = val.strip()
+                elif key == "for":
+                    r["note"] = unlink_name(val)
+            out.append(r)
+    return out
+
+
+PROC = Path(os.environ.get("YGG_PROC", "/proc"))  # overridable so tests can take /proc away
+
+
+def etime_seconds(v):
+    """ps's elapsed time, [[dd-]hh:]mm:ss, in seconds."""
+    days, _, rest = v.strip().rpartition("-")
+    parts = [int(x) for x in rest.split(":")]
+    while len(parts) < 3:
+        parts.insert(0, 0)
+    return int(days or 0) * 86400 + parts[0] * 3600 + parts[1] * 60 + parts[2]
+
+
+def pid_state(pid, since=None):
+    """"running", "ended" or "unknown" for a PID on this machine. Asks /proc, else ps (macOS has no
+    /proc), else kill -0; a zombie (exited, not yet reaped) counts as ended, and so does a process that
+    started after `since` (epoch seconds: the PID was reused). "unknown" when nothing can tell, as in a
+    sandbox that hides other processes' details."""
+    try:
+        pid = int(pid)
+    except ValueError:
+        return "unknown"
+    started = None
+    if (PROC / "self" / "stat").exists():
+        try:
+            fields = (PROC / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()
+        except FileNotFoundError:
+            return "ended"
+        except (OSError, IndexError):
+            fields = None
+        if fields:
+            if fields[0] in "ZX":
+                return "ended"
+            try:
+                boot = next(int(l.split()[1]) for l in (PROC / "stat").read_text().splitlines() if l.startswith("btime"))
+                started = boot + int(fields[19]) / os.sysconf("SC_CLK_TCK")
+            except (OSError, StopIteration, IndexError, ValueError):
+                pass
+            return "ended" if since and started and started > since + 60 else "running"
+    try:
+        out = subprocess.run(["ps", "-o", "stat=,etime=", "-p", str(pid)], stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, universal_newlines=True, timeout=5)
+        if out.returncode == 0 and out.stdout.strip():
+            stat, etime = out.stdout.split()[:2]
+            if stat.startswith("Z"):
+                return "ended"
+            started = time.time() - etime_seconds(etime)
+            return "ended" if since and started > since + 60 else "running"
+        if out.returncode == 1 and not out.stdout.strip():
+            return "ended"
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    try:
+        os.kill(pid, 0)
+        return "running"
+    except ProcessLookupError:
+        return "ended"
+    except PermissionError:
+        return "running"
+    except OSError:
+        return "unknown"
+
+
+def pid_alive(pid):
+    return pid_state(pid) != "ended"
+
+
+def ago(seconds):
+    for unit, size in (("d", 86400), ("h", 3600), ("min", 60)):
+        if seconds >= size:
+            return "%d %s ago" % (seconds // size, unit)
+    return "just now"
+
+
+def run_states(vault):
+    """all_runs with what can be checked deterministically here: state ("running", "ended", "elsewhere"
+    for another host, "job" for cluster jobs), each log's path and mtime, and whether the run has been
+    looked at (`seen`) and falls in the window since the last handoff (`recent`)."""
+    root = vault.root
+    entries = notebook_entries(root)
+    found = all_runs(root)
+    hand = [i for i, e in enumerate(entries) if "handoff" in e["tag"].lower()]
+    since = hand[-1] if hand else 0
+    try:
+        bases = [Path(git(root, "rev-parse", "--show-toplevel").strip()), root]
+    except (subprocess.CalledProcessError, OSError):
+        bases = [root]
+    bodies = "\n".join(n.body for n in list(vault.nodes.values()) + list(vault.projects.values()))
+    dropped = {x.strip() for e in entries for m in DROP_LINE_RE.finditer(e["text"]) for x in m.group(1).split(",")}
+    for r in found:
+        r["dropped"] = r["id"] in dropped
+        later = "\n".join(RUN_LINE_RE.sub("", e["text"]) for e in entries[r["entry"]:])
+        note = vault.nodes.get(r["note"]) if r["note"] else None
+        r["seen"] = (r["dropped"] or r["id"] in later or r["id"] in bodies
+                     or (note is not None and note.status == "done"))
+        r["recent"] = r["entry"] >= since
+        if r["host"] and r["host"] != HOST:
+            r["state"] = "elsewhere"
+        elif r["pids"]:
+            logged = time.mktime(time.strptime(r["when"], "%Y-%m-%d %H:%M")) if len(r["when"]) == 16 else None
+            states = {p: pid_state(p, logged) for p in r["pids"]}
+            r["alive"] = [p for p, st in states.items() if st == "running"]
+            r["state"] = ("running" if r["alive"] else "unknown" if "unknown" in states.values() else "ended")
+        else:
+            r["state"] = "job"
+        r["files"] = []
+        for name in r["logs"]:
+            path = Path(name).expanduser()
+            hit = next((h for h in ([path] if path.is_absolute() else [b / path for b in bases]) if h.exists()), None)
+            r["files"].append((name, hit, hit.stat().st_mtime if hit else None))
+    return found
+
+
+def needs_action(vault, found):
+    """Lines for runs that need someone: ended runs since the last handoff that nothing mentions yet, ended
+    runs whose `for` note is not done, and running ones whose logs have gone quiet."""
+    out = []
+    for r in found:
+        note = vault.nodes.get(r["note"]) if r["note"] else None
+        if r["dropped"]:
+            continue
+        if r["state"] == "ended" and note is not None and note.status != "done":
+            out.append("- %s ended (%s); [[%s]] is not done: read its output and fill it in" % (
+                r["id"], r["when"], note.stem))
+        elif r["state"] == "ended" and r["recent"] and not r["seen"]:
+            out.append("- %s ended (%s) and nothing mentions it yet: note the result in a node, or in a line "
+                       "of the notebook" % (r["id"], r["when"]))
+        if r["state"] == "running":
+            quiet = [(n, t) for n, h, t in r["files"] if t and time.time() - t > STUCK_HOURS * 3600]
+            if quiet and len(quiet) == len([f for f in r["files"] if f[1]]):
+                out.append("- %s is running, but %s was last written %s: it may be stuck" % (
+                    r["id"], quiet[0][0], ago(time.time() - quiet[0][1])))
+    return out
+
+
+def runs_summary(found):
+    """One line about the runs since the last handoff and those still running, or None."""
+    shown = [r for r in found if r["recent"] or r["state"] == "running"]
+    if not shown:
+        return None
+    count = defaultdict(int)
+    for r in shown:
+        count[r["state"]] += 1
+    names = (("running", "running"), ("ended", "ended"), ("job", "cluster job%s"), ("elsewhere", "on other hosts"),
+             ("unknown", "not checkable here"))
+    bits = ["%d %s" % (count[k], v % ("" if count[k] == 1 else "s") if "%" in v else v) for k, v in names if count[k]]
+    return "Runs since the last handoff or still running: %s. `ygg runs` lists them." % ", ".join(bits)
+
+
+def describe_run(r):
+    state = {"running": "running", "ended": "ended", "job": "cluster job, check it yourself",
+             "unknown": "cannot tell from here (a sandbox?); check it yourself",
+             "elsewhere": "on %s, not checked here" % r["host"]}[r["state"]]
+    if r["dropped"]:
+        state = "dropped" + (", still running" if r["state"] == "running" else "")
+    head = "- %s (%s): %s%s%s" % (r["id"], r["when"], state, "" if r["seen"] else ", not mentioned since",
+                                   ", for [[%s]]" % r["note"] if r["note"] else "")
+    lines = [head]
+    for name, hit, t in r["files"]:
+        lines.append("  - %s: %s" % (name, "last written " + ago(time.time() - t) if hit else
+                                      "not on this machine"))
+    return lines
+
+
+def cmd_runs(a):
+    vault = open_vault(a)
+    found = run_states(vault)
+    if a.note:
+        n = vault.resolve(a.note)
+        found = [r for r in found if r["note"] == n.stem or r["id"] in n.body]
+    elif not a.all:
+        found = [r for r in found if r["state"] == "running" or (not r["dropped"] and (
+                 (r["recent"] and not r["seen"])
+                 or (r["note"] in vault.nodes and vault.nodes[r["note"]].status != "done")))]
+    if not found:
+        print("No runs%s." % ("" if a.all or a.note else " running or waiting to be looked at (`--all` for every run)"))
+        return
+    for r in found:
+        print("\n".join(describe_run(r)))
+    action = needs_action(vault, found)
+    if action:
+        print("\n## Needs action\n" + "\n".join(action))
+
+
+def cmd_drop(a):
+    vault = open_vault(a)
+    found = {r["id"]: r for r in run_states(vault)}
+    missing = [x for x in a.ids if x not in found]
+    if missing:
+        die("no run %s in the notebook (`ygg runs --all` lists them)" % ", ".join(missing))
+    killed = []
+    if a.kill:
+        for rid in a.ids:
+            r = found[rid]
+            if r["state"] == "elsewhere":
+                warn("%s runs on %s; stop it there" % (rid, r["host"]))
+            for pid in r.get("alive") or []:
+                try:
+                    os.kill(int(pid), signal.SIGTERM)
+                    killed.append(pid)
+                except OSError as e:
+                    warn("could not stop PID %s: %s" % (pid, e))
+    text = (a.reason or "").strip() or "Dropped."
+    if killed:
+        text += "\n\nStopped PID %s." % ", ".join(killed)
+    head = append_entry(vault.root, "dropped", text + "\n\ndropped " + ", ".join(a.ids))
+    print("%s: %s" % (NOTEBOOK, head))
+    still = [r["id"] for r in (found[x] for x in a.ids) if r["state"] == "running" and not set(r["alive"]) <= set(killed)]
+    if still:
+        print("still running: %s (use --kill to stop it)" % ", ".join(still))
+
+
+# Log lines that mean a run has failed, whatever it says later. Broad on purpose: a false alarm costs a
+# look at the log; a missed crash looks just like a run still going.
+FAIL_RE = re.compile(r"Traceback \(most recent call last\)|\b[A-Z]\w*Error\b|\bKilled\b|[Oo]ut of memory|\bOOM\b|"
+                     r"Segmentation fault|core dumped|CUDA error|\bFAILED\b|\bCANCELLED\b|\bnan\b")
+
+
+def cmd_watch(a):
+    vault = open_vault(a)
+    found = [r for r in run_states(vault) if r["state"] == "running" and not r["dropped"]]
+    if a.targets:
+        picked = []
+        for t in a.targets:
+            hits = [r for r in found if r["id"] == t]
+            if not hits:
+                n = vault.resolve(t)
+                hits = [r for r in found if r["note"] == n.stem or r["id"] in n.body]
+            picked += [r for r in hits if r not in picked]
+        found = picked
+    if not found:
+        print("Nothing to watch: no logged run %s is running on %s." % ("of those" if a.targets else "", HOST))
+        return
+    emit = lambda line: print(line, flush=True)
+    emit("Watching %s on %s; this ends when %s ends." % (", ".join(r["id"] for r in found), HOST,
+                                                        "the first" if a.first else "the last"))
+    files = [(r, name, path) for r in found for name, path, t in r["files"] if path]
+    offset = {path: path.stat().st_size for r, name, path in files}
+    failed, quiet, live = set(), set(), list(found)
+    deadline = time.time() + a.timeout * 3600 if a.timeout else None
+    while live:
+        time.sleep(a.interval)
+        for r, name, path in files:
+            try:
+                st = path.stat()
+                with path.open("rb") as f:
+                    f.seek(min(offset[path], st.st_size))
+                    new = f.read().decode(errors="replace")
+                offset[path] = st.st_size
+            except OSError:
+                continue
+            hit = next((x for x in new.splitlines() if FAIL_RE.search(x)), None)
+            if hit and path not in failed:
+                failed.add(path)
+                emit("%s: failure in %s: %s" % (r["id"], name, hit.strip()[:200]))
+            if time.time() - st.st_mtime > a.quiet_hours * 3600:
+                if path not in quiet:
+                    quiet.add(path)
+                    emit("%s: %s not written for %s; it may be stuck" % (r["id"], name, ago(time.time() - st.st_mtime)))
+            else:
+                quiet.discard(path)
+        for r in list(live):
+            since = time.mktime(time.strptime(r["when"], "%Y-%m-%d %H:%M")) if len(r["when"]) == 16 else None
+            if not any(pid_state(p, since) == "running" for p in r["pids"]):
+                live.remove(r)
+                emit("%s ended%s." % (r["id"], ", for [[%s]]" % r["note"] if r["note"] else ""))
+        if a.first and len(live) < len(found):
+            break
+        if deadline and time.time() > deadline:
+            emit("Stopped watching after %g h; still running: %s." % (a.timeout, ", ".join(r["id"] for r in live)))
+            break
+    vault = Vault(vault.root)
+    action = needs_action(vault, run_states(vault))
+    emit("\n".join(action) if action else "Nothing needs action.")
 
 
 # --- Report ----------------------------------------------------------------------
+
+LIST_CAP = 8  # notes per group (and notebook entries) that `ygg report` lists without --all
+
 
 def cmd_report(a):
     vault = open_vault(a)
@@ -1099,21 +1529,35 @@ def cmd_report(a):
                                                           key=lambda n: str(n.meta.get("dateModified")))))
     if a.project:
         groups = [g for g in groups if g[0] != "Not in any project"]
+    cap = None if a.all else LIST_CAP
     for title, group in groups:
+        if not group:
+            continue
         print("## %s (%d)" % (title, len(group)))
-        for n in group:
-            print("- %s [%s]" % (describe(n), ", ".join(members.get(n.stem, [])) or "no project"))
+        for n in group[:cap]:
+            print("- %s%s" % (describe(n), "" if a.project else
+                              " [%s]" % (", ".join(members.get(n.stem, [])) or "no project")))
+        if cap and len(group) > cap:
+            print("- … and %d more (`--all`)" % (len(group) - cap))
         print()
     if since and a.since != "handoff":
         entries = [e for e in entries if e["when"] >= since]
     if since or entries:
-        shown = entries if since else entries[-5:]
-        print("## Notebook entries%s (%d%s)" % (" since " + since if since else ", latest", len(shown),
-                                                "" if since else " of %d" % len(entries)))
+        pool = entries if since or not cap else entries[-5:]
+        shown = pool[-cap:] if cap else pool
+        print("## Notebook entries%s (%s)" % (" since " + since if since else "",
+                                              "%d" % len(shown) if len(shown) == len(entries)
+                                              else "latest %d of %d" % (len(shown), len(entries))))
         for e in shown:
             first = e["text"].splitlines()[0] if e["text"] else ""
             print("- %s%s: %s" % (e["when"], " — " + e["tag"] if e["tag"] else "", first[:100]))
         print()
+    found = run_states(vault)
+    line, action = runs_summary(found), needs_action(vault, found)
+    if line:
+        print("## Runs\n%s\n" % line)
+    if action:
+        print("## Needs action (%d)\n%s\n" % (len(action), "\n".join(action)))
 
 
 def cmd_sync(a):
@@ -1146,8 +1590,10 @@ def cmd_check(a):
     sys.exit(1 if errors else 0)
 
 
-def outline(vault):
-    """Print each project's tree, from its roots down through follow-ups, claims and evidence."""
+def outline(vault, marks=None):
+    """Print each project's tree, from its roots down through follow-ups, claims and evidence, with
+    `marks` ({stem: note}) after the notes they name."""
+    marks = marks or {}
     edges = vault.edges()
     children = defaultdict(list)
     for rel, s, d in edges:
@@ -1158,7 +1604,8 @@ def outline(vault):
         seen = set()
 
         def walk(n, depth, how):
-            print("%s- %s%s" % ("  " * depth, how + " " if how else "", describe(n)))
+            print("%s- %s%s%s" % ("  " * depth, how + " " if how else "", describe(n),
+                                  "  " + marks[n.stem] if n.stem in marks else ""))
             if n.stem in seen:
                 return
             seen.add(n.stem)
@@ -1172,28 +1619,52 @@ def outline(vault):
         print()
 
 
+def repo_state(path, *paths):
+    """(repository root, short HEAD commit, whether `paths` under `path` (default: all of it) have
+    uncommitted changes)."""
+    base = path if path.is_dir() else path.parent
+    try:
+        top = Path(git(base, "rev-parse", "--show-toplevel").strip())
+        commit = git(base, "rev-parse", "--short", "HEAD").strip()
+        dirty = git(top, "status", "--porcelain", "--", *[str(path / x) for x in paths or ("",)]).strip()
+    except (subprocess.CalledProcessError, OSError):
+        die("%s is not in a git repository with a commit" % path)
+    return top, commit, bool(dirty)
+
+
+def origin_key(n):
+    """(repository, nodeInstanceId) of the note a seeded note was copied from, or None."""
+    m = ORIGIN_RE.match(str(n.meta.get("origin") or ""))
+    return (m.group(1), m.group(2)) if m else None
+
+
 def cmd_compress(a):
     target = open_vault(a)
     src = Path(a.tree).resolve()
     if not src.exists():
         die("%s does not exist" % src)
+    top, commit, dirty = repo_state(src)
+    ref = "%s@%s:%s" % (top.name, commit, src.relative_to(top).as_posix() or ".")
+    same_tree = lambda n: re.sub(r"@\w+:", ":", str(n.meta.get("tree", ""))) == re.sub(r"@\w+:", ":", ref)
+    older = sorted((n for n in target.nodes.values() if n.type == "source" and same_tree(n)
+                    and n.meta.get("tree") != ref), key=lambda n: str(n.meta.get("dateCreated")))
     if (src / "ygg.json").exists():
         project = Vault(src)
         errs = all_errors(project)
         if errs:
             warn("%s has %d check errors; run `ygg --vault %s check`" % (src, len(errs), src))
-        outline(project)
+        marks = seeded_marks(project, target)
+        last = older[-1] if older else None
+        changes = since_compression(project, top, src, last) if last else None
+        for stem, how in (changes or {}).get("marks", {}).items():
+            marks[stem] = ("(%s since the last compression) " % how + marks.get(stem, "")).strip()
+        outline(project, marks)
         paper_matches(project, target)
+        seeded_report(project, target)
+        if changes:
+            print(changes["text"])
     else:
         print("%s is not a ygg tree; recording it as a Source only.\n" % src)
-    base = src if src.is_dir() else src.parent
-    try:
-        top = Path(git(base, "rev-parse", "--show-toplevel").strip())
-        commit = git(base, "rev-parse", "--short", "HEAD").strip()
-        dirty = git(top, "status", "--porcelain", "--", str(src)).strip()
-    except (subprocess.CalledProcessError, OSError):
-        die("%s is not in a git repository with a commit" % src)
-    ref = "%s@%s:%s" % (top.name, commit, src.relative_to(top).as_posix() or ".")
     if dirty and not a.dry_run:
         die("%s has uncommitted changes; commit them before compressing so the Source can cite a commit" % src)
     if dirty:
@@ -1203,9 +1674,6 @@ def cmd_compress(a):
     if existing:
         print("Source for %s: [[%s]] (already recorded)" % (ref, existing[0].stem))
         return
-    same_tree = lambda n: re.sub(r"@\w+:", ":", str(n.meta.get("tree", ""))) == re.sub(r"@\w+:", ":", ref)
-    older = sorted((n for n in target.nodes.values() if n.type == "source" and same_tree(n)),
-                   key=lambda n: str(n.meta.get("dateCreated")))
     if older or "@" + title in target.nodes:
         title += " %s" % commit
     if a.dry_run:
@@ -1217,6 +1685,170 @@ def cmd_compress(a):
     print("\nNext: create the compressed Questions, Claims and Evidence with `ygg new`, deriving the "
           "Evidence from this Source (and its Dataset) with --link derived-from:..., then add the roots "
           "to the project note in ideas/.")
+
+
+def seeded_marks(project, target):
+    """{stem: "seeded from [[main note]]"} for the project tree's notes copied from this tree."""
+    uid, out = target.by_uid(), {}
+    here = target_repo(target)
+    for n in project.nodes.values():
+        key = origin_key(n)
+        if key and key[0] == here:
+            orig = uid.get(key[1])
+            out[n.stem] = ("(seeded)" if orig and orig.stem == n.stem else
+                           "(seeded from [[%s]])" % orig.stem if orig else "(seeded from a note no longer here)")
+    return out
+
+
+def target_repo(vault):
+    try:
+        return Path(git(vault.root, "rev-parse", "--show-toplevel").strip()).name
+    except (subprocess.CalledProcessError, OSError):
+        return vault.root.name
+
+
+def seeded_report(project, target):
+    """List what the project added under the notes it was seeded with from this tree: these are the
+    relations to write against the original notes here."""
+    uid, here = target.by_uid(), target_repo(target)
+    seeded = {n.stem: uid.get(origin_key(n)[1]) for n in project.nodes.values()
+              if origin_key(n) and origin_key(n)[0] == here}
+    if not seeded:
+        return
+    print("# Seeded from this tree")
+    print("%d notes were seeded from here. What the project related to them, to write against the "
+          "originals here:" % len(seeded))
+    edges = project.edges()
+    for stem, orig in sorted(seeded.items()):
+        new = [(rel, s_, d) for rel, s_, d in edges if stem in (s_.stem, d.stem)
+               and not (s_.stem in seeded and d.stem in seeded)]
+        if not new and orig and orig.stem == stem:
+            continue
+        print("- [[%s]]%s" % (stem, "" if orig and orig.stem == stem else
+                              " (here: [[%s]])" % orig.stem if orig else " (no longer here)"))
+        for rel, s_, d in new:
+            print("  - [[%s]] %s [[%s]]" % (s_.stem, RELATIONS[rel][0], d.stem))
+    print()
+
+
+def since_compression(project, top, src, last):
+    """What changed in the project tree since the commit `last` (its earlier tree Source) recorded."""
+    old = str(last.meta.get("tree")).split("@", 1)[1].split(":", 1)[0]
+    rel_src = src.relative_to(top).as_posix()
+    try:
+        diff = git(top, "diff", "--name-status", old, "HEAD", "--", rel_src + "/tree")
+        old_rels = json.loads(git(top, "show", "%s:%s/relations.json" % (old, rel_src))).get("relations", {})
+        old_book = git(top, "show", "%s:%s/%s" % (old, rel_src, NOTEBOOK))
+    except (subprocess.CalledProcessError, OSError, ValueError):
+        return {"text": "# Since the last compression\n\n(cannot compare with commit %s)\n" % old, "marks": {}}
+    marks = {}
+    for line in diff.splitlines():
+        parts = line.split("\t")
+        stem = Path(parts[-1]).stem
+        if stem in project.nodes:
+            marks[stem] = "new" if parts[0][0] in "AR" else "changed"
+    uid = project.by_uid()
+    new_rels = [(REL_BY_ID.get(r.get("type")), uid.get(r.get("source")), uid.get(r.get("destination")))
+                for rid, r in project.relations.items() if rid not in old_rels]
+    new_rels = [(r, s_, d) for r, s_, d in new_rels if r and s_ and d]
+    entries = notebook_entries(project.root)
+    n_old = len(ENTRY_RE.findall(old_book))
+    out = ["# Since the last compression ([[%s]], commit %s)" % (last.stem, old), "",
+           "%d notes new, %d changed, %d relations new, %d notebook entries new." % (
+               sum(v == "new" for v in marks.values()), sum(v == "changed" for v in marks.values()),
+               len(new_rels), max(0, len(entries) - n_old))]
+    for r, s_, d in new_rels:
+        out.append("- [[%s]] %s [[%s]]" % (s_.stem, RELATIONS[r][0], d.stem))
+    for e in entries[n_old:]:
+        first = e["text"].splitlines()[0] if e["text"] else ""
+        out.append("- notebook %s%s: %s" % (e["when"], " — " + e["tag"] if e["tag"] else "", first[:100]))
+    return {"text": "\n".join(out) + "\n", "marks": marks}
+
+
+def cmd_seed(a):
+    target = open_vault(a)
+    main_root = find_vault(a.source)
+    main = Vault(main_root)
+    top, commit, dirty = repo_state(main_root, "tree", "relations.json")
+    if dirty and not a.dry_run:
+        die("%s has uncommitted notes; commit them first so the copies can cite a commit" % main_root)
+    starts = [main.resolve(x) for x in a.notes]
+    stems = main.below([n.stem for n in starts], a.depth)
+    if target.projects and a.project:
+        project = target.resolve(a.project, ("project",))
+    elif len(target.projects) == 1:
+        project = next(iter(target.projects.values()))
+    else:
+        die("name the project to add the roots to with --project" if target.projects else
+            "this tree has no project yet; make one first: ygg new project TITLE --id ID")
+    by_origin = {origin_key(n): n for n in target.nodes.values() if origin_key(n)}
+    mapping, copies, reused, clashes = {}, [], [], []
+    for stem in sorted(stems):
+        n = main.nodes[stem]
+        here = by_origin.get((top.name, n.uid)) or next(
+            (o for o in target.nodes.values() if paper_ids(n) & paper_ids(o)), None)
+        if here:
+            mapping[stem] = here
+            reused.append((n, here))
+            continue
+        if stem in target.nodes:
+            clashes.append(stem)
+            continue
+        c = Note(target.root / "tree" / (stem + ".md"), dict(n.meta), dict(n.raw), n.body)
+        c.set("nodeInstanceId", uuid7())
+        c.set("origin", "%s@%s:%s" % (top.name, commit, n.uid))
+        mapping[stem] = c
+        copies.append(c)
+    if clashes:
+        die("these notes already exist here and were not seeded from %s; rename them or seed less:\n  " % top.name
+            + "\n  ".join(clashes))
+    for c in copies:
+        target.nodes[c.stem] = c
+    names = set(target.nodes) | set(target.projects)
+    unlinked = 0
+    for c in copies:
+        def plain(m):
+            nonlocal unlinked
+            if m.group(1).strip() in names:
+                return m.group(0)
+            unlinked += 1
+            return m.group(0)[2:-2].split("|")[-1]
+        body = WIKILINK_RE.sub(plain, c.body)
+        if body != c.body:
+            c.body = body
+    edges = [(rel, mapping[s_.stem], mapping[d.stem]) for rel, s_, d in main.edges()
+             if s_.stem in mapping and d.stem in mapping]
+    have = {(r.get("type"), r.get("source"), r.get("destination")) for r in target.relations.values()}
+    new_edges = [(rel, s_, d) for rel, s_, d in edges if (REL_ID[rel], s_.uid, d.uid) not in have]
+    roots = [unlink_name(r) for r in project.meta.get("roots") or []]
+    add_roots = [mapping[n.stem].stem for n in starts if mapping[n.stem].stem not in roots]
+    print("Seeding [[%s]] from %s@%s:" % (project.stem, top.name, commit))
+    for c in copies:
+        print("- copy %s" % describe(c))
+    for n, here in reused:
+        print("- reuse [[%s]] for [[%s]] (already here)" % (here.stem, n.stem))
+    print("- %d relations, %d new roots%s" % (len(new_edges), len(add_roots),
+                                             ", %d links to notes not copied made plain text" % unlinked
+                                             if unlinked else ""))
+    if a.dry_run:
+        return
+    errs = []
+    for c in copies:
+        errs += ["[[%s]]: %s" % (c.stem, e) for e in note_errors(c, target)]
+    if errs:
+        die("the copies would not pass check:\n  " + "\n  ".join(errs))
+    for rel, s_, d in new_edges:
+        add_relation(target, rel, s_, d)
+    project.set("roots", [wikilink(r) for r in roots + add_roots])
+    for c in copies:
+        c.save()
+    project.save()
+    append_entry(target.root, "seed", "Seeded from %s@%s: %s, with %d notes under %s." % (
+        top.name, commit, ", ".join("[[%s]]" % mapping[n.stem].stem for n in starts), len(stems) - len(starts),
+        "it" if len(starts) == 1 else "them"))
+    finish(target, [])
+    print("\nNext: expand the open questions into concrete sub-questions and planned runs (the ygg:seed "
+          "skill), and work in this tree; `ygg compress` in %s later maps the results back." % top.name)
 
 
 def paper_matches(project, target):
@@ -1329,6 +1961,8 @@ def add_field_args(p):
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="ygg", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--vault", help="tree root (the folder with ygg.json); default: found from the cwd")
+    ap.add_argument("--version", action="version",
+                    version="ygg %s (tree format %d)" % (__version__, SPEC_VERSION))
     sub = ap.add_subparsers(dest="cmd")
     sub.required = True
     rels = ", ".join(RELATIONS)
@@ -1383,6 +2017,7 @@ def main(argv=None):
     p.add_argument("--project", help="only this project's notes")
     p.add_argument("--since", help="YYYY-MM-DD, or 'handoff' for the last handoff entry in the notebook: also list "
                    "the notes changed and the notebook entries since then")
+    p.add_argument("--all", action="store_true", help="list every note in each group (default: the first %d)" % LIST_CAP)
     p.set_defaults(func=cmd_report)
 
     p = sub.add_parser("log", help="append a dated entry to the tree's lab notebook, NOTEBOOK.md")
@@ -1390,7 +2025,23 @@ def main(argv=None):
     p.add_argument("--tag", help="a word for the heading, e.g. decision, dead-end, run")
     p.add_argument("--handoff", action="store_true", help="tag it handoff: where things stand, for the next session")
     p.add_argument("--body", help="markdown file with the entry, or - for stdin")
+    p.add_argument("--pid", action="append", default=[], help="log a run: a process on this machine (repeatable)")
+    p.add_argument("--job", action="append", default=[], help="log a run: a cluster job id (repeatable)")
+    p.add_argument("--log", action="append", default=[], help="the run's log file (repeatable)")
+    p.add_argument("--for", dest="note", help="the note the run serves, when it already exists")
     p.set_defaults(func=cmd_log)
+
+    p = sub.add_parser("drop", help="record that runs were given up (a pivot, a bug, a better idea), so nothing "
+                       "flags them again")
+    p.add_argument("ids", nargs="+", help="run ids, from `ygg runs`")
+    p.add_argument("--reason", "-m", help="why, in a sentence")
+    p.add_argument("--kill", action="store_true", help="also stop their processes on this machine (SIGTERM)")
+    p.set_defaults(func=cmd_drop)
+
+    p = sub.add_parser("runs", help="list the logged runs that are running or not yet looked at, with their logs")
+    p.add_argument("note", nargs="?", help="only the runs logged for this note or cited in it")
+    p.add_argument("--all", action="store_true", help="every run logged in the notebook")
+    p.set_defaults(func=cmd_runs)
 
     p = sub.add_parser("sync", help="regenerate projects: fields and fill missing TaskNotes dates")
     p.set_defaults(func=cmd_sync)
@@ -1403,6 +2054,26 @@ def main(argv=None):
     p.add_argument("--title", help="Source title; default '<repository> research tree'")
     p.add_argument("--dry-run", dest="dry_run", action="store_true", help="outline only; record nothing")
     p.set_defaults(func=cmd_compress)
+
+    p = sub.add_parser("seed", help="copy notes and everything under them from another tree (usually the "
+                       "main tree) into this one, as roots of a project")
+    p.add_argument("notes", nargs="+", help="the notes to start from, named in the other tree")
+    p.add_argument("--from", dest="source", required=True, help="the tree to copy from (any folder in it)")
+    p.add_argument("--project", help="the project here to add them to; default: the only one")
+    p.add_argument("--depth", type=int, help="how many steps down to copy (default: everything under them)")
+    p.add_argument("--dry-run", dest="dry_run", action="store_true", help="list what would be copied")
+    p.set_defaults(func=cmd_seed)
+
+    p = sub.add_parser("watch", help="wait for logged runs to end, printing a line when one ends, its log shows a "
+                       "failure, or its log goes quiet")
+    p.add_argument("targets", nargs="*", help="run ids, or notes whose runs to watch (default: every logged run "
+                   "running on this machine)")
+    p.add_argument("--first", action="store_true", help="return when the first one ends")
+    p.add_argument("--interval", type=float, default=30, help="seconds between checks (default 30)")
+    p.add_argument("--quiet-hours", dest="quiet_hours", type=float, default=STUCK_HOURS,
+                   help="report a log not written for this long (default %d)" % STUCK_HOURS)
+    p.add_argument("--timeout", type=float, help="stop after this many hours")
+    p.set_defaults(func=cmd_watch)
 
     p = sub.add_parser("serve", help="browse and edit the tree in a local web app")
     p.add_argument("--port", type=int, default=8765)
