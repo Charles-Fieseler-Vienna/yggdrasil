@@ -72,7 +72,7 @@ with the `ygg:seed` skill; this note is its entry point here, and its results co
 
 ## 5. Close
 
-Record the session in the notebook, with what did not become notes: `ygg log --tag brainstorm --body FILE`,
+Record the session in the notebook, with what did not become notes: `ygg log --tag brainstorm --body -` (on stdin),
 saying in a few lines the ideas considered and set aside (and why), the open threads worth returning to, and
 links to the notes made (`[[QUE - ...]]`). Then run `ygg check` and fix anything you caused, and summarise what
 was added. Commit only when the user asks.

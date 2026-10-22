@@ -5,6 +5,12 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
+## 0.5.8 (2026-10-23), tree format 2
+
+- `--data` is accepted for `--add-data` (on a new Source there is nothing to add to).
+- "done evidence needs an outcome" names the flag and its values.
+- The handoff, compress and brainstorm skills pass notebook bodies on stdin, not through a file.
+
 ## 0.5.7 (2026-10-23), tree format 2
 
 - `ygg sync` may fill in `dateCreated` and `completedDate` missing from a done note (one made in Obsidian)

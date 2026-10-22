@@ -141,6 +141,10 @@ def test_done_outcomes(populated, ygg, tmp_path):
     _, out = ygg("done", "Does it travel", "--outcome", "succeeded", ok=False)
     assert "--outcome is for Evidence; a question is done without one" in out
     assert "status: open" in (populated / "tree" / "QUE - Does it travel.md").read_text()
+    _, out = ygg("new", "evidence", "Done at once", "--body", body(tmp_path, EVIDENCE), "--status", "done",
+                 "--link", "informs:Is the head wave driven", ok=False)
+    assert "done evidence needs an outcome (--outcome succeeded" in out
+    assert not (populated / "tree" / "EVD - Done at once.md").exists()
 
 
 def test_supersede(populated, ygg, tmp_path):
@@ -160,6 +164,8 @@ def test_papers(tree, ygg):
     assert "already has doi" in out
     _, out = ygg("show", "zotero:2Q9B3YAH")
     assert "doi: 10.1234/ABC" in out
+    ygg("new", "source", "A run", "--run", "repo@abc1234:fit.py", "--data", "results/fit", "--status", "done")
+    assert "results/fit" in (tree / "tree" / "@A run.md").read_text()
 
 
 def test_notebook_and_report_since_handoff(populated, ygg):

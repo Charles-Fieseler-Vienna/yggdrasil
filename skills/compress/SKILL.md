@@ -20,5 +20,5 @@ often from brainstorms: with the user, move each into the main tree as a new not
 leave it. On a second compression of the same tree, **Since the last compression** lists only the new and
 changed notes, relations and notebook entries, and the outline marks them.
 
-Close with a notebook entry in the main tree (`ygg log --tag compress --body FILE`) listing what was
+Close with a notebook entry in the main tree (`ygg log --tag compress --body -`, on stdin) listing what was
 compressed, what was left in the project tree and why, then `ygg check`. Commit only when the user asks.

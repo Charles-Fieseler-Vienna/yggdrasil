@@ -366,13 +366,13 @@ It is a [uv](https://docs.astral.sh/uv/) script: its first lines declare Python 
 | Command | Does |
 |---|---|
 | `ygg init [PATH] [--project TITLE]` | Makes PATH a tree: folders, `ygg.json`, `relations.json`, templates, plugin settings. Safe to rerun; it upgrades settings in place. |
-| `ygg new TYPE TITLE [--link REL:NOTE] [--link-from REL:NOTE] [--body FILE] ...` | Creates a node (`TYPE` is a node type) or a project note (`project`, with `--root`). |
+| `ygg new TYPE TITLE [--link REL:NOTE] [--link-from REL:NOTE] [--body FILE|-] ...` | Creates a node (`TYPE` is a node type) or a project note (`project`, with `--root`). |
 | `ygg link SOURCE REL TARGET` / `ygg unlink ...` | Adds or removes a relation. |
 | `ygg set NOTE [...]` | Changes fields or the body of an editable node, or a project's roots. |
 | `ygg done NOTE [--outcome X]` | Finishes and freezes a node. |
 | `ygg show NOTE` | Prints a note with its relations (and a claim's datasets), or a project with its members. |
 | `ygg report [--project P] [--since DATE\|handoff] [--all]` | Lists the questions waiting on the user and those answered since the last handoff, then high-priority and in-progress work, open nodes, unanswered questions, low-confidence claims, notes in no project, and notes out of scope (apart from the work lists). A superseded note is left out of the work lists, since a newer note has taken over its work; one not yet done is listed once more at the end. With `--since`, also the notes changed and the notebook entries since then; then the open to-dos and open issues. Kept short: empty groups are left out and each lists its first 8 notes (`--all` for every one); runs get one summary line and a **Needs action** group (see [Runs](#runs)). |
-| `ygg log [TEXT] [--tag WORD] [--handoff] [--body FILE] [--pid N] [--job ID] [--log PATH] [--for NOTE] [--todo TEXT] [--issue --affects NOTE] [--ask QUESTION --on NOTE --blocks NOTE]` | Appends a dated entry to the notebook (see [Notebook](#notebook)); with `--pid` or `--job`, logs a run and prints its id (see [Runs](#runs)); `--todo` adds to-do lines, `--issue` an issue line, `--ask` a question for the user (see [To-dos, issues and questions for the user](#to-dos-issues-and-questions-for-the-user)). |
+| `ygg log [TEXT] [--tag WORD] [--handoff] [--body FILE|-] [--pid N] [--job ID] [--log PATH] [--for NOTE] [--todo TEXT] [--issue --affects NOTE] [--ask QUESTION --on NOTE --blocks NOTE]` | Appends a dated entry to the notebook (see [Notebook](#notebook)); with `--pid` or `--job`, logs a run and prints its id (see [Runs](#runs)); `--todo` adds to-do lines, `--issue` an issue line, `--ask` a question for the user (see [To-dos, issues and questions for the user](#to-dos-issues-and-questions-for-the-user)). |
 | `ygg tick TEXT [-m NOTE]` | Ticks the one open to-do containing TEXT. |
 | `ygg issues [ID] [--all] [--notes]` | Lists open issues and the notes resting on what they affect, judged or still to judge. |
 | `ygg impact NOTE...` | Lists the notes that rest on these, and how. |

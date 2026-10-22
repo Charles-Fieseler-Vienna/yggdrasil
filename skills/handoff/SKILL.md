@@ -31,7 +31,7 @@ project's tree (the folder with `ygg.json`, e.g. `research/tree`), or pass `--va
    judged, and say in the handoff which notes are still to judge. A decision left for the user is a question
    (`ygg log "context" --ask "..." --on NOTE --blocks NOTE`), not a "your call" in the handoff's prose; act on
    the answers given since the last handoff (the report lists them) and cite their ids.
-4. **Write the handoff entry** with `ygg log --handoff --body FILE`, short and concrete:
+4. **Write the handoff entry** with `ygg log --handoff --body - <<'EOF'` … `EOF`, short and concrete:
    - where things stand, in two or three sentences;
    - runs: each one still going, by its run id (`ygg runs` lists them), with where output will land;
      and each ended or dropped run since the last handoff that no node records, by id, with its result in a

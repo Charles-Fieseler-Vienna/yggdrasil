@@ -24,7 +24,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-__version__ = "0.5.7"  # the tool; keep .claude-plugin/plugin.json in step
+__version__ = "0.5.8"  # the tool; keep .claude-plugin/plugin.json in step
 # The tree format. Bump it when a tree written by this ygg could fail the checks of an older one, and
 # teach `ygg init` to upgrade older trees; ygg.json records each tree's format as spec_version.
 SPEC_VERSION = 2  # 2: notes in no project are allowed (a warning, not an error)
@@ -569,7 +569,7 @@ def validate_node(n, vault):
         if not m.get("completedDate"):
             errs.append("a done note needs completedDate")
         if t == "evidence" and not m.get("outcome"):
-            errs.append("done evidence needs an outcome")
+            errs.append("done evidence needs an outcome (--outcome succeeded, failed or ambiguous)")
         for s in TYPES[t]["required"]:
             if not section_text(n.body, s):
                 errs.append("a done %s needs a non-empty ## %s section" % (t, s))
@@ -2589,7 +2589,7 @@ def add_field_args(p):
     p.add_argument("--zotero", help="Zotero item key of a paper, e.g. 2Q9B3YAH (sources)")
     p.add_argument("--doi", help="DOI of a paper, e.g. 10.48550/arXiv.2410.14673 (sources)")
     p.add_argument("--citekey", help="Better BibTeX citekey, for writing (sources)")
-    p.add_argument("--add-data", dest="add_data", action="append", default=[], help="data location (sources)")
+    p.add_argument("--add-data", "--data", dest="add_data", action="append", default=[], help="data location (sources)")
     p.add_argument("--add-figure", dest="add_figure", action="append", default=[],
                    help="repository@commit:path or absolute cluster path (sources)")
     p.add_argument("--location", help="datasets")
