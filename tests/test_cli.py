@@ -64,6 +64,10 @@ def test_question_evidence_claim(populated, ygg):
     assert "nodeInstanceId" not in out and "nodeTypeId" not in out and "confidence:" in out
     _, out = ygg("show", "test-project")
     assert out.count("\n- ") == 4
+    _, out = ygg("new", "question", "Does it travel", "--link", "follows-from:Is the head wave driven")
+    assert out.splitlines()[-1] == "in project test-project"
+    _, out = ygg("new", "question", "A loose thought")
+    assert "in no project yet" in out
 
 
 def test_claim_needs_evidence(tree, ygg, tmp_path):

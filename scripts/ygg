@@ -981,6 +981,9 @@ def cmd_new(a):
         add_relation(vault, rel, s, d)
     n.save()
     finish(vault, [n])
+    ps = n.meta.get("projects") or []
+    print("in %s" % ("project%s %s" % ("s" if len(ps) > 1 else "", ", ".join(unlink_name(p) for p in ps)) if ps else
+                     "no project yet: link it to a note of one, or make it a root (`ygg set PROJECT --add-root`)"))
 
 
 def cmd_link(a):
