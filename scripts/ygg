@@ -24,7 +24,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-__version__ = "0.4.0"  # the tool; keep .claude-plugin/plugin.json in step
+__version__ = "0.4.1"  # the tool; keep .claude-plugin/plugin.json in step
 # The tree format. Bump it when a tree written by this ygg could fail the checks of an older one, and
 # teach `ygg init` to upgrade older trees; ygg.json records each tree's format as spec_version.
 SPEC_VERSION = 2  # 2: notes in no project are allowed (a warning, not an error)
@@ -1298,6 +1298,23 @@ def last_handoff(root):
     return hand[-1]["when"] if hand else None
 
 
+def uncommitted(root):
+    """What in the tree differs from git's HEAD, in a few words ("5 notes, NOTEBOOK.md"), or None: at the
+    start of a session, the sign of one that stopped before committing."""
+    try:
+        out = git(root, "status", "--porcelain", "--untracked-files=all", "--", ".")
+        prefix = git(root, "rev-parse", "--show-prefix").strip()
+    except (subprocess.CalledProcessError, OSError):
+        return None
+    paths = [line[3:].strip().strip('"').split(" -> ")[-1] for line in out.splitlines() if line.strip()]
+    paths = [p[len(prefix):] if p.startswith(prefix) else p for p in paths]
+    notes = sum(1 for p in paths if p.startswith(("tree/", "ideas/")))
+    rest = sorted(p for p in paths if not p.startswith(("tree/", "ideas/")))
+    bits = (["%d note%s" % (notes, "" if notes == 1 else "s")] if notes else []) + rest[:4]
+    bits += ["%d more files" % (len(rest) - 4)] if len(rest) > 4 else []
+    return ", ".join(bits) or None
+
+
 def loose_notes(vault, members=None):
     """Notes no project's roots reach: allowed (a brainstorm may leave them), but worth seeing."""
     members = vault.membership() if members is None else members
@@ -1362,7 +1379,8 @@ def cmd_log(a):
     for target in inline_links(text):
         if target not in names:
             warn("[[%s]] does not exist" % target)
-    print("%s: %s%s" % (NOTEBOOK, head, "\nrun id: %s (cite it where the result is recorded)" % rid if rid else ""))
+    print("%s: %s%s" % (NOTEBOOK, head, "\nrun id: %s (cite it where the result is recorded). `ygg watch`, in the "
+                         "background, returns when it ends, with the end of its log." % rid if rid else ""))
     if iid:
         issue = next(i for i in issue_states(open_vault(a)) if i["id"] == iid)
         print("issue id: %s (`ygg issues %s` lists what rests on it; `ygg resolve %s` closes it)" % (iid, iid, iid))
@@ -1686,10 +1704,24 @@ def cmd_drop(a):
 
 # Log lines that mean a run has failed, whatever it says later. Broad on purpose: a false alarm costs a
 # look at the log; a missed crash looks just like a run still going.
+WATCH_TAIL = 5  # log lines `ygg watch` prints when a run ends
 FAIL_RE = re.compile(r"Traceback \(most recent call last\)|\b[A-Z]\w*Error\b|\bKilled\b|[Oo]ut of memory|\bOOM\b|"
                      r"Segmentation fault|core dumped|CUDA error|\bFAILED\b|\bCANCELLED\b|"
                      # a NaN loss, not any nan printed (a QC line may report "freq=nan" on purpose)
                      r"(?i:(?<![a-z])(loss|nll|elbo|objective|grad)\w*[^\n]{0,40}\bnan\b|\bnans? (detected|encountered)\b)")
+
+
+def log_tail(path, n):
+    """The last n non-empty lines of a log, each as a terminal would show it (the text after its last
+    carriage return, so a progress bar gives its final state)."""
+    try:
+        with path.open("rb") as f:
+            f.seek(max(0, path.stat().st_size - 65536))
+            text = f.read().decode(errors="replace")
+    except OSError:
+        return []
+    lines = [x.rsplit("\r", 1)[-1].rstrip() for x in text.split("\n")]
+    return [x for x in lines if x.strip()][-n:] if n > 0 else []
 
 
 def cmd_watch(a):
@@ -1739,7 +1771,13 @@ def cmd_watch(a):
             since = time.mktime(time.strptime(r["when"], "%Y-%m-%d %H:%M")) if len(r["when"]) == 16 else None
             if not any(pid_state(p, since) == "running" for p in r["pids"]):
                 live.remove(r)
-                emit("%s ended%s." % (r["id"], ", for [[%s]]" % r["note"] if r["note"] else ""))
+                ends = ["%s ended%s." % (r["id"], ", for [[%s]]" % r["note"] if r["note"] else "")]
+                for name, path, t in r["files"]:
+                    tail = log_tail(path, a.tail) if path else []
+                    if tail:
+                        ends.append("  %s, last %d line%s:" % (name, len(tail), "" if len(tail) == 1 else "s"))
+                        ends += ["    " + x[:300] for x in tail]
+                emit("\n".join(ends))
         if a.first and len(live) < len(found):
             break
         if deadline and time.time() > deadline:
@@ -2418,6 +2456,8 @@ def main(argv=None):
     p.add_argument("--quiet-hours", dest="quiet_hours", type=float, default=STUCK_HOURS,
                    help="report a log not written for this long (default %d)" % STUCK_HOURS)
     p.add_argument("--timeout", type=float, help="stop after this many hours")
+    p.add_argument("--tail", type=int, default=WATCH_TAIL,
+                   help="lines of each log to print when its run ends (default %d; 0 for none)" % WATCH_TAIL)
     p.set_defaults(func=cmd_watch)
 
     p = sub.add_parser("serve", help="browse and edit the tree in a local web app")

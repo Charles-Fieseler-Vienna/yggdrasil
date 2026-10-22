@@ -232,13 +232,14 @@ def test_watch(populated, ygg):
                                   "--first", "--interval", "0.3"], stdout=subprocess.PIPE, universal_newlines=True)
         time.sleep(1)
         with log.open("a") as f:
-            f.write("epoch 3\nRuntimeError: CUDA error: out of memory\n")
+            f.write("epoch 3\nRuntimeError: CUDA error: out of memory\nbootstrap 10/200\rbootstrap 200/200\n")
         out, _ = watch.communicate(timeout=20)
         lines = out.splitlines()
         assert lines[0].startswith("Watching %s, %s on " % (fit, other)) and "ends when the first ends" in lines[0]
         assert "%s: failure in fit.log: RuntimeError: CUDA error: out of memory" % fit in out
-        assert "old Traceback" not in out
-        assert "%s ended, for [[EVD - Pending fit]]." % fit in out
+        assert "failure in fit.log: old Traceback" not in out
+        assert "%s ended, for [[EVD - Pending fit]].\n  fit.log, last 4 lines:\n" % fit in out
+        assert "    RuntimeError: CUDA error: out of memory\n    bootstrap 200/200\n" in out  # a progress bar's end
         assert "%s ended" % fit in lines[-1] and "is not done" in lines[-1]
         _, out = ygg("watch", "Pending fit")
         assert "Nothing to watch" in out

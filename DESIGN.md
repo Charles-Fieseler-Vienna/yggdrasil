@@ -48,7 +48,7 @@ The tool:
 yggdrasil/
 ├── .claude-plugin/   # plugin.json and marketplace.json (see Plugin)
 ├── bin/ygg           # the command, put on Claude's PATH by the plugin
-├── hooks/            # the SessionStart and post-Bash hooks
+├── hooks/            # the SessionStart, pre-Bash and post-Bash hooks
 ├── skills/           # tree, seed, paper, digest, brainstorm, handoff
 ├── tests/            # pytest: the CLI, the hooks, the web app (optional)
 ├── schema/
@@ -284,7 +284,7 @@ with the host filled in, `jobs 123456` for cluster jobs (`--job`), and `for [[EV
 
 What can be checked is checked deterministically, on the run's own host only: whether each PID still runs and when each log was last written. A PID is checked through `/proc` where it exists, else `ps` (macOS has no `/proc`), else `kill -0`; a zombie (exited, not reaped) counts as ended, and so does a process that started after the run was logged, since its PID was reused. When nothing can tell, as in a sandbox that hides other processes, the run is "not checkable here", never "ended". Cluster jobs and runs on other hosts are listed, not checked; a container usually has its own hostname, so runs logged inside one count as on another host. `ygg log --pid` warns when the PID is not running where it is logged. Log paths are resolved where `ygg log` runs and stored relative to the tree's repository (absolute when outside it), so they mean the same on every clone. `ygg report` and the session hook give one summary line and a **Needs action** group: an ended run that nothing mentions yet, if it was logged since the last handoff, or `for` a note that is not done (whenever it was logged), and a running one whose logs have been quiet for two hours. `ygg runs` lists the runs still running or waiting to be looked at, with their logs (`--all` for every run, `ygg runs NOTE` for one note's), and `ygg show NOTE` lists a note's runs.
 
-`ygg watch [ID | NOTE ...]` blocks until the logged runs running on this machine (or those named) end, printing one line per event: a run ended, its log printed a failure (a Traceback, an `...Error`, Killed, out of memory, `nan`...; new lines only), or its log went quiet; then the Needs action lines. It is plain output, so any agent harness can run it in the background and be woken when it returns (`--first` to return at the first end, `--timeout HOURS`). It ends with the session that started it; the next session starts it again if runs are still going.
+`ygg watch [ID | NOTE ...]` blocks until the logged runs running on this machine (or those named) end, printing one line per event: a run ended (with the last lines of each of its logs, `--tail N`, 5 by default, as a terminal shows them, so a progress bar gives its final state), its log printed a failure (a Traceback, an `...Error`, Killed, out of memory, `nan`...; new lines only), or its log went quiet; then the Needs action lines. It replaces an agent's own wait-then-read loop, and `ygg log --pid` says so when it logs a run. It is plain output, so any agent harness can run it in the background and be woken when it returns (`--first` to return at the first end, `--timeout HOURS`). It ends with the session that started it; the next session starts it again if runs are still going.
 
 ### To-dos and issues
 
@@ -369,7 +369,7 @@ It is a [uv](https://docs.astral.sh/uv/) script: its first lines declare Python 
 | `ygg resolve ID... [-m HOW]` | Closes issues, warning about notes not yet judged. |
 | `ygg runs [NOTE] [--all]` | Lists the runs still running or waiting to be looked at, with their logs. |
 | `ygg drop ID... [-m WHY] [--kill]` | Gives runs up, so nothing flags them again. |
-| `ygg watch [ID\|NOTE...] [--first] [--timeout H]` | Waits for runs to end, printing a line per end, failure or quiet log. |
+| `ygg watch [ID\|NOTE...] [--first] [--timeout H] [--tail N]` | Waits for runs to end, printing a line per end (with the end of its logs), failure or quiet log. |
 | `ygg sync` | Regenerates `projects:` and fills in TaskNotes dates missing from notes made in Obsidian. |
 | `ygg compress PATH [--dry-run]` | Outlines a project tree and records it as a Source at its commit; refuses uncommitted trees. Maps seeded notes back, lists notes out of scope or in no project there and, the second time, lists what changed. |
 | `ygg seed NOTE... --from TREE [--project P] [--depth N] [--dry-run]` | Copies notes and everything under them from another tree into this one (see [Seeding](#seeding)). |
@@ -459,8 +459,9 @@ claude plugin install ygg@yggdrasil
 | Part | Does |
 |---|---|
 | `bin/ygg` | The `ygg` command on Claude's PATH. |
+| `hooks/pre_bash.py` | Before a Bash command, in a repository with a tree: stops a wait loop polling `pgrep -f PATTERN`, which never ends because the loop's own shell has the pattern in its command line, and points to `ygg watch`, a loop on `kill -0 PID`, or a pattern opening with a bracket class. Silent elsewhere. |
 | `hooks/post_bash.py` | After a Bash command, in a repository with a tree: if it launched a run (`nohup`, `sbatch`, a trailing `&`, a background command...), reminds Claude to log it with its PID, host and logs; if it committed and the notebook has no entry from the last 20 minutes, reminds Claude to log any decision or result. Silent elsewhere. |
-| `hooks/session_start.py` | At session start, looks for a tree at or above the working directory, else up to three levels below it. If it finds one, it adds the rules in brief (load `ygg:tree`, change notes only with `ygg`, keep the notebook and log runs, offer a handoff, brainstorm, seed and compress) and where the work stands: counts, in-progress and high-priority notes, the last handoff and how many entries followed it, open issues and the number of open to-dos, the runs named since, and a tree in another format. The web app's Overview shows the same, word for word. Elsewhere it prints nothing. |
+| `hooks/session_start.py` | At session start, looks for a tree at or above the working directory, else up to three levels below it. If it finds one, it adds the rules in brief (load `ygg:tree`, change notes only with `ygg`, keep the notebook and log runs, offer a handoff, brainstorm, seed and compress) and where the work stands: counts, in-progress and high-priority notes, the last handoff and how many entries followed it, open issues and the number of open to-dos, the runs named since, uncommitted changes in the tree (the sign of a session that stopped before recording its work), and a tree in another format. The web app's Overview shows the same, word for word. Elsewhere it prints nothing. |
 | `ygg:seed` | Starts a project tree from main-tree questions with `ygg seed`, then expands them into sub-questions and planned runs. |
 | `ygg:tree` | The working rules: the one rule, commands and allowed relations, runs, superseding, compression, the notebook, and how to write nodes. |
 | `ygg:paper` | Adds one paper as a Source (from Zotero) and records what it means for a project as Evidence. |

@@ -65,7 +65,7 @@ it). When a result matters, record it as a node: a Source with `--run repository
 Evidence derived from it, citing the run ids in its Method. `run` uses a real commit (`git -C REPO rev-parse
 --short HEAD`), never a branch; if the run used uncommitted code, tell the user rather than citing a commit
 that doesn't match. `ygg runs` lists runs still going or not looked at; `ygg watch` (in the background)
-returns when they end, reporting failures in their logs. Wait with it rather than a loop of your own, and stop
+returns when they end, with the last lines of each log, reporting failures on the way. Wait with it rather than a loop of your own, and stop
 any background wait you started before you finish (a leftover one keeps a headless session from ending).
 
 **Starting a project from the main tree.** `ygg seed NOTE --from MAIN_TREE` in the project's tree copies a

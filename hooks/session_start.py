@@ -66,6 +66,10 @@ def summary(ygg, root, cwd):
     elif entries:
         lines.append("  No handoff yet; the notebook has %d entries, the latest from %s."
                      % (len(entries), entries[-1]["when"]))
+    dirty = ygg.uncommitted(root)
+    if dirty:
+        lines.append("  Uncommitted in the tree: %s. A session may have stopped before recording and committing "
+                     "its work: check `git status` and the notebook's latest entries." % dirty)
     issues = [i for i in ygg.issue_states(vault) if not i["resolved"]]
     for i in issues[:5]:
         lines.append("  Open issue " + "\n  ".join(ygg.describe_issue(i))[2:])

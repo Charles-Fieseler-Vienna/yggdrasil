@@ -85,3 +85,33 @@ def test_session_start_lists_open_issues_and_todos(tmp_path):
     out = hook("session_start.py", {"cwd": str(root)})
     assert "Open issue i" in out and "Bad frames in two recordings." in out
     assert "1 open to-do in the notebook" in out
+
+
+def test_session_start_mentions_uncommitted_tree_changes(tmp_path):
+    root = make_repo(tmp_path / "proj", "research/tree")
+    out = hook("session_start.py", {"cwd": str(tmp_path / "proj")})
+    assert "Uncommitted" not in out
+    run("--vault", root, "new", "question", "Half done")
+    run("--vault", root, "log", "cut off here")
+    out = hook("session_start.py", {"cwd": str(tmp_path / "proj")})
+    assert "Uncommitted in the tree: 1 note, NOTEBOOK.md" in out
+
+
+def guard(cwd, command):
+    out = hook("pre_bash.py", {"cwd": str(cwd), "tool_name": "Bash", "tool_input": {"command": command}})
+    return json.loads(out)["hookSpecificOutput"] if out.strip() else None
+
+
+def test_pre_bash_stops_self_matching_wait_loops(tmp_path):
+    repo = tmp_path / "proj"
+    make_repo(repo, "research/tree")
+    out = guard(repo, 'until ! pgrep -f "n-matched" >/dev/null; do sleep 10; done; tail run.log')
+    assert out["permissionDecision"] == "deny"
+    assert "ygg watch" in out["permissionDecisionReason"] and "'[n]-matched'" in out["permissionDecisionReason"]
+    assert guard(repo, "while pgrep -af 'metric isotropic' >/dev/null; do sleep 5; done")
+    # a bracket class, a loop on kill -0, or a one-off pgrep are fine; so is any loop outside a tree
+    assert guard(repo, "until ! pgrep -f '[n]-matched' >/dev/null; do sleep 10; done") is None
+    assert guard(repo, "while kill -0 123; do sleep 10; done") is None
+    assert guard(repo, "pgrep -af n-matched | grep -v bash") is None
+    (tmp_path / "elsewhere").mkdir()
+    assert guard(tmp_path / "elsewhere", 'until ! pgrep -f "n-matched"; do sleep 10; done') is None

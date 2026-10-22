@@ -5,6 +5,16 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
+## 0.4.1 (2026-10-22), tree format 2
+
+- `ygg watch` prints the last lines of each log when a run ends (`--tail N`, 5 by default; a progress bar
+  shows its final state), so it replaces waiting and then reading the log.
+- `ygg log --pid` points to `ygg watch` when it logs a run.
+- The session hook says when the tree has uncommitted changes, the sign of a session that stopped before
+  recording and committing its work.
+- A pre-Bash hook stops wait loops polling `pgrep -f PATTERN`, which never end (the loop's own shell matches
+  the pattern), and points to `ygg watch`. The post-Bash hook no longer suggests `pgrep -f` for a run's PID.
+
 ## 0.4.0 (2026-10-22), tree format 2
 
 - To-dos: Markdown task lines in notebook entries, written with `ygg log --todo TEXT` and ticked with
