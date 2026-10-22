@@ -382,6 +382,15 @@ def test_loose_and_out_of_scope_notes(populated, project, tmp_path):
     assert "out-of-scope" not in out
 
 
+def test_compress_maps_seeds_into_a_clone_in_another_folder(populated, project, tmp_path):
+    seed(project, "Is the head wave", "--from", populated)
+    commit(project.parent.parent, "seeded")
+    clone = tmp_path / "elsewhere" / "main-copy"
+    subprocess.run(["git", "clone", "-q", str(populated), str(clone)], check=True)
+    _, out = run("--vault", clone, "compress", project, "--dry-run")
+    assert "(seeded)" in out and "# Seeded from this tree" in out
+
+
 def test_compress_refuses_uncommitted(populated, project):
     run("--vault", project, "new", "question", "Dirty")
     _, out = run("--vault", populated, "compress", project, ok=False)

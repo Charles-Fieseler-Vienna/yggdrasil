@@ -13,6 +13,8 @@ tree's `ygg.json`) changes only when a tree written by a new ygg could fail the 
   (a run for a Question stayed flagged for as long as the Question was open).
 - The post-Bash hook ignores commands that run `ygg` anywhere, words inside quotes and heredocs, and
   background commands that only wait (a loop on `pgrep` or `sleep`, `tail -f`).
+- Seeded notes are matched to their originals by note id alone, so `ygg compress` into a clone of the main
+  tree in a folder of another name still maps them back.
 - `ygg seed --depth N` brings each Claim's Evidence along; it left them behind, and the copies failed `ygg check`.
 
 ## 0.3.0 (2026-10-22), tree format 2

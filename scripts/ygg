@@ -1738,12 +1738,13 @@ def scope_report(project):
 
 
 def seeded_marks(project, target):
-    """{stem: "seeded from [[main note]]"} for the project tree's notes copied from this tree."""
+    """{stem: "seeded from [[main note]]"} for the project tree's notes copied from this tree. Origins
+    match by note id, which is unique, so a clone of the main tree in another folder matches too."""
     uid, out = target.by_uid(), {}
     here = target_repo(target)
     for n in project.nodes.values():
         key = origin_key(n)
-        if key and key[0] == here:
+        if key and (key[1] in uid or key[0] == here):
             orig = uid.get(key[1])
             out[n.stem] = ("(seeded)" if orig and orig.stem == n.stem else
                            "(seeded from [[%s]])" % orig.stem if orig else "(seeded from a note no longer here)")
@@ -1762,7 +1763,7 @@ def seeded_report(project, target):
     relations to write against the original notes here."""
     uid, here = target.by_uid(), target_repo(target)
     seeded = {n.stem: uid.get(origin_key(n)[1]) for n in project.nodes.values()
-              if origin_key(n) and origin_key(n)[0] == here}
+              if origin_key(n) and (origin_key(n)[1] in uid or origin_key(n)[0] == here)}
     if not seeded:
         return
     print("# Seeded from this tree")
@@ -1831,11 +1832,11 @@ def cmd_seed(a):
     else:
         die("name the project to add the roots to with --project" if target.projects else
             "this tree has no project yet; make one first: ygg new project TITLE --id ID")
-    by_origin = {origin_key(n): n for n in target.nodes.values() if origin_key(n)}
+    by_origin = {origin_key(n)[1]: n for n in target.nodes.values() if origin_key(n)}  # by note id
     mapping, copies, reused, clashes = {}, [], [], []
     for stem in sorted(stems):
         n = main.nodes[stem]
-        here = by_origin.get((top.name, n.uid)) or next(
+        here = by_origin.get(n.uid) or next(
             (o for o in target.nodes.values() if paper_ids(n) & paper_ids(o)), None)
         if here:
             mapping[stem] = here
