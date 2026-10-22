@@ -24,6 +24,8 @@ export const api = {
   markDone: (id, body) => call("POST", "notes/" + encodeURIComponent(id) + "/done", body),
   link: (body) => call("POST", "relations", body),
   unlink: (id) => call("DELETE", "relations/" + encodeURIComponent(id)),
+  overview: () => call("GET", "overview"),
+  tick: (text) => call("POST", "todos/tick", { text }),
 };
 
 // Calls onVersion(version) now and whenever the tree changes on disk; reconnects by itself.

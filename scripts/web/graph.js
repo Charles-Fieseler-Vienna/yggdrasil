@@ -15,21 +15,55 @@ export function indexGraph(g) {
 }
 
 // The nodes passing the filters, their layout parents and children, and the top roots.
-export function structure(G, hiddenTypes, project) {
-  const inSet = new Set(G.nodes.filter((n) => !hiddenTypes.has(n.type) &&
+// Notes superseded by another note, mapped to the newest note that replaces them.
+export function supersededBy(G) {
+  const newer = new Map();
+  for (const e of G.edges) if (e.rel === "supersedes" && G.byId.has(e.source)) newer.set(e.target, e.source);
+  const latest = new Map();
+  for (const id of newer.keys()) {
+    let x = id;
+    const seen = new Set();
+    while (newer.has(x) && !seen.has(x)) { seen.add(x); x = newer.get(x); }
+    latest.set(id, x);
+  }
+  return latest;
+}
+
+// hiddenTypes may also hold "superseded": superseded notes are then left out, and the note replacing each
+// takes its place, with its parents and children (so nothing under it is lost).
+// With `only` (a test on notes, as for the frontier), the structure has only the notes passing it: a note
+// whose parents all fail it becomes a root, and `cut` maps each note to the parents left out above it.
+// Roots then come in order of rank (high priority, in progress, under an open issue) rather than by name.
+export function structure(G, hiddenTypes, project, only) {
+  const latest = hiddenTypes.has("superseded") ? supersededBy(G) : new Map();
+  const now = (id) => latest.get(id) || id;
+  const base = new Set(G.nodes.filter((n) => !hiddenTypes.has(n.type) && !latest.has(n.id) &&
     (!project || n.projects.includes(project) || !n.projects.length)).map((n) => n.id));  // and notes in no project
-  const parents = new Map(), children = new Map();
-  for (const id of inSet) { parents.set(id, []); children.set(id, []); }
-  for (const e of G.edges) {
-    if (e.rel === "blocked-by" || !inSet.has(e.source) || !inSet.has(e.target)) continue;
+  const inSet = only ? new Set([...base].filter((id) => only(G.byId.get(id)))) : base;
+  const parents = new Map(), children = new Map(), cut = new Map();
+  for (const id of inSet) { parents.set(id, []); children.set(id, []); cut.set(id, []); }
+  for (const e0 of G.edges) {
+    if (latest.size && e0.rel === "supersedes") continue;
+    const e = latest.size ? { ...e0, source: now(e0.source), target: now(e0.target) } : e0;
+    if (e.source === e.target) continue;
+    if (e.rel === "blocked-by" || !base.has(e.source) || !base.has(e.target)) continue;
     const [p, c] = layoutPair(e);
+    if (!inSet.has(p) || !inSet.has(c)) {
+      if (inSet.has(c) && !cut.get(c).includes(p)) cut.get(c).push(p);
+      continue;
+    }
     if (!children.get(p).includes(c)) children.get(p).push(c);
     if (!parents.get(c).includes(p)) parents.get(c).push(p);
   }
   const byStem = (a, b) => G.byId.get(a).stem.localeCompare(G.byId.get(b).stem);
+  const rank = (id) => {
+    const n = G.byId.get(id);
+    return (n.meta.priority === "high" ? 0 : 4) + (n.status === "in-progress" ? 0 : 2) + (n.issues.length ? 0 : 1);
+  };
   for (const list of children.values()) list.sort(byStem);
-  const roots = [...inSet].filter((id) => !parents.get(id).length).sort(byStem);
-  return { inSet, parents, children, roots };
+  const roots = [...inSet].filter((id) => !parents.get(id).length)
+    .sort(only ? (a, b) => rank(a) - rank(b) || byStem(a, b) : byStem);
+  return { inSet, parents, children, roots, cut };
 }
 
 export function defaultUnfolded(G, s) {
@@ -78,12 +112,17 @@ export function downPath(s, from, to) {
   return path;
 }
 
-// Filters that show only some notes, each with the path up to its root for context.
+// Filters that show only some notes, each with the path up to its root for context; a `restrict` filter
+// instead shows only its notes, cut loose from the rest (see structure).
 export const FILTERS = {
+  agenda: { label: "What the agent sees first", test: (n) => n.agenda.length > 0 },
+  frontier: { label: "Frontier: the ways forward", restrict: true,
+              test: (n) => ["open", "gap"].includes(n.flag) && !n.superseded && n.meta.priority !== "none" },
   "in-progress": { label: "In progress", test: (n) => n.status === "in-progress" },
   "not-done": { label: "Not done", test: (n) => n.status !== "done" },
   gap: { label: "Gaps", test: (n) => n.flag === "gap" },
   out: { label: "Out of scope", test: (n) => n.flag === "out" },
+  issue: { label: "Under an open issue", test: (n) => n.issues.length > 0 },
   weak: { label: "Weak", test: (n) => ["low", "refuted"].includes(n.confidence) || ["failed", "ambiguous"].includes(n.outcome) },
   changed: { label: "Changed since…", test: (n, f) => !f.since || String(n.meta.dateModified || "").slice(0, 10) >= f.since },
   field: { label: "Field…", test: (n, f) => fieldMatches(n, f.key, f.value) },
@@ -144,7 +183,8 @@ export function computeView(G, s, unfolded, focus, filter) {
   }
   const nodes = [...shown].map((id) => {
     const folded = !isOpen(id) && kids(id).some((c) => !shown.has(c));
-    return { node: G.byId.get(id), folded, match: !filter || filter.matches.has(id),
+    const from = s.cut && !s.parents.get(id).length ? s.cut.get(id).map((p) => G.byId.get(p)) : [];
+    return { node: G.byId.get(id), folded, match: !filter || filter.matches.has(id), from,
              hidden: folded ? hiddenBelow(G, kids, shown, id) : { count: 0, gaps: 0 } };
   });
   const edges = [];

@@ -19,6 +19,66 @@ function renderBody(md) {
   return DOMPurify.sanitize(marked.parse(linked));
 }
 
+// With nothing selected and no filter: where the work stands, as the agent is told it (the same lists the
+// SessionStart briefing and `ygg report` give), and the briefing itself.
+function Overview({ G, onReveal, onAction }) {
+  const [o, setO] = useState(null);
+  const [error, setError] = useState(null);
+  const [ticking, setTicking] = useState(new Set());  // to-dos ticked here, until the notebook says so
+  useEffect(() => {
+    let live = true;
+    api.overview().then((r) => live && (setO(r), setError(null))).catch((e) => live && setError(e.message));
+    return () => { live = false; };
+  }, [G.version]);
+  if (error) return html`<aside className="panel"><p className="muted">${error}</p></aside>`;
+  if (!o) return html`<aside className="panel"><p className="muted">Loading…</p></aside>`;
+  const link = (id, stem) => (id ? html`<a onClick=${() => onReveal(id)}>${stem}</a>` : stem);
+  const section = (title, count, body) => html`<section className="overview-part"><h3>${title}${count === null ? "" : " (" + count + ")"}</h3>${body}</section>`;
+  return html`
+    <aside className="panel overview">
+      <h2>Where things stand</h2>
+      ${section("What the agent sees first", o.agenda.length, o.agenda.length ? html`
+        <ul className="match-list">${o.agenda.map((a) => {
+          const n = G.byId.get(a.id);
+          return html`<li key=${a.id} className="agenda-item"><div>${link(a.id, n ? n.title : a.stem)}</div>
+            <div className="muted">${a.why.join(", ")}
+            ${n && n.status !== "done" ? html` · priority <select className="inline" value=${n.meta.priority || "normal"} title="priority"
+                onChange=${(e) => onAction("priority", e.target.value, a.id)}>
+              ${G.schema.priorities.map((v) => html`<option key=${v} value=${v}>${v}</option>`)}</select>` : null}</div></li>`;
+        })}</ul>` : html`<p className="muted">Nothing in progress, at high priority or named in the last handoff.
+          Set a note's priority to high to put it here.</p>`)}
+      ${o.todos.length ? section("To do, from the notebook", o.todos.length, html`
+        <ul className="todos">${o.todos.slice().reverse().map((t) => html`
+          <li key=${t.entry + ":" + t.text}><label><input type="checkbox" checked=${ticking.has(t.entry + ":" + t.text)}
+            onChange=${() => { setTicking(new Set(ticking).add(t.entry + ":" + t.text)); onAction("tick", t.text); }} />
+            ${t.text}</label> <span className="muted">${t.when.slice(0, 10)}</span></li>`)}</ul>`) : null}
+      ${o.issues.length ? section("Open issues", o.issues.length, html`${o.issues.map((i) => html`
+        <div key=${i.id} className="issue">
+          <p><span className="issue-badge">!</span> <b>${i.id}</b> ${i.title}</p>
+          <p className="muted">${i.notes.length} note${i.notes.length === 1 ? "" : "s"} still to judge${i.judged ? ", " + i.judged + " judged" : ""}</p>
+          <ul>${i.notes.slice(0, 12).map((n) => html`<li key=${n.stem}>${link(n.id, n.stem)}</li>`)}
+            ${i.notes.length > 12 ? html`<li className="muted">and ${i.notes.length - 12} more</li>` : null}</ul>
+        </div>`)}`) : null}
+      ${o.runs || o.needs_action.length ? section("Runs", null, html`
+        ${o.runs ? html`<p>${o.runs.replace(" `ygg runs` lists them.", "")}</p>` : null}
+        ${o.needs_action.length ? html`<ul>${o.needs_action.map((x, i) => html`<li key=${i}>${x.replace(/^- /, "")}</li>`)}</ul>` : null}`) : null}
+      ${o.handoff ? section("Last handoff, " + o.handoff.when, null, html`
+        <div className="markdown" onClick=${(e) => {
+          const a = e.target.closest("a.wikilink");
+          const target = a && G.byStem.get(a.dataset.stem);
+          if (target) onReveal(target.id);
+        }} dangerouslySetInnerHTML=${{ __html: renderBody(o.handoff.text) }} />`) : null}
+      ${o.entries.length ? section("Recent notebook entries", null, html`
+        <ul className="entries">${o.entries.map((e, i) => html`<li key=${i}><span className="muted">${e.when}${e.tag ? " · " + e.tag : ""}</span><br />${e.first}</li>`)}</ul>`) : null}
+      <details className="briefing">
+        <summary>The agent's briefing at session start, word for word</summary>
+        <pre>${o.briefing}</pre>
+      </details>
+      <p className="muted hint">Select a note to see it here. Ctrl-click (or Cmd-click) a note to fold or unfold what is under
+        it; alt-click (or Focus) to show only that note and what is under it.</p>
+    </aside>`;
+}
+
 // With nothing selected and a filter on: its matches, most recently changed first.
 function MatchList({ G, matches, onReveal }) {
   const list = [...matches].map((id) => G.byId.get(id))
@@ -49,14 +109,16 @@ export function Panel({ G, id, matches, onReveal, onFocus, onAction, onUnlink })
   }, [id, G.version]);
 
   if (!n && matches) return html`<${MatchList} G=${G} matches=${matches} onReveal=${onReveal} />`;
-  if (!n) {
-    return html`<aside className="panel"><p className="muted">
-      Select a note to see it here. Ctrl-click (or Cmd-click) a note to fold or unfold what is under it;
-      alt-click (or Focus) to show only that note and what is under it.</p></aside>`;
-  }
+  if (!n) return html`<${Overview} G=${G} onReveal=${onReveal} onAction=${onAction} />`;
   const spec = G.schema.types[n.type];
   const done = n.status === "done";
-  const fields = [["status", n.status], ["priority", n.meta.priority], ["confidence", n.confidence], ["outcome", n.outcome],
+  const priority = done ? n.meta.priority : html`
+    <select className="inline" value=${n.meta.priority || "normal"} onChange=${(e) => onAction("priority", e.target.value)}
+            title="high: listed to the agent at the start of each session; none: off the frontier">
+      ${G.schema.priorities.map((v) => html`<option key=${v} value=${v}>${v}</option>`)}
+    </select>`;
+  const fields = [["status", n.status], ["priority", priority], ["agent", n.agenda.length ? "sees it first (" + n.agenda.join(", ") + ")" : null],
+                  ["confidence", n.confidence], ["outcome", n.outcome],
                   ["flag", FLAG_TEXT[n.flag]], ["projects", n.projects.join(", ") || "none"],
                   ...["zotero", "doi", "citekey", "run", "tree", "location", "origin"].map((k) => [k, n.meta[k]]), ["file", n.file]];
   const relations = G.edges.filter((e) => e.source === n.id || e.target === n.id);
@@ -70,6 +132,9 @@ export function Panel({ G, id, matches, onReveal, onFocus, onAction, onUnlink })
     <aside className="panel">
       <span className="type-chip" style=${{ background: spec.color }}>${spec.name}</span>
       <h2>${n.title}</h2>
+      ${n.issues.length ? html`<div className="issues">${n.issues.map((i) => html`
+        <p key=${i.id}><span className="issue-badge">!</span> <b>${i.id}</b> ${i.title}: to judge whether this still
+          holds (rerun and supersede, or note it unaffected in the notebook with the issue id).</p>`)}</div>` : null}
       <dl className="fields">
         ${fields.filter(([, v]) => v).map(([k, v]) => html`<dt key=${k + "t"}>${k}</dt><dd key=${k}>${v}</dd>`)}
       </dl>

@@ -65,7 +65,8 @@ it). When a result matters, record it as a node: a Source with `--run repository
 Evidence derived from it, citing the run ids in its Method. `run` uses a real commit (`git -C REPO rev-parse
 --short HEAD`), never a branch; if the run used uncommitted code, tell the user rather than citing a commit
 that doesn't match. `ygg runs` lists runs still going or not looked at; `ygg watch` (in the background)
-returns when they end, reporting failures in their logs.
+returns when they end, reporting failures in their logs. Wait with it rather than a loop of your own, and stop
+any background wait you started before you finish (a leftover one keeps a headless session from ending).
 
 **Starting a project from the main tree.** `ygg seed NOTE --from MAIN_TREE` in the project's tree copies a
 main-tree question (or claim) and everything under it, each copy recording its `origin`, and makes it a root;
@@ -89,6 +90,18 @@ changed notes, relations and notebook entries, and the outline marks them.
 
 **The notebook.** While working, append decisions, dead ends and surprises as they happen:
 `ygg log "..." --tag decision` (or `dead-end`, `run`, `idea`). At the end of a session use `ygg:handoff`.
+Small next steps are to-dos, task lines in an entry: `ygg log "..." --todo "check the H=50 fits"` (repeatable;
+without text the entry is only the to-dos). Tick one when done with `ygg tick TEXT` (`-m` says what came of
+it); `ygg report` lists the open ones. Never edit past entries otherwise. A next step that is an experiment
+is a planned Evidence note, not a to-do.
+
+**A problem in something results rest on** (a bug in code, bad recordings, a wrong preprocessing step): log
+it at once as an issue, naming the notes it touches: `ygg log "what is wrong" --issue --affects "DATA - ..."`.
+Don't invalidate everything below it. `ygg issues ID` lists every note resting on it; judge each with the
+user: if the problem could change it, rerun and supersede it (a fixed Dataset supersedes the old one); if
+not, write a notebook line naming the issue id and the note with the reason
+(`ygg log "i261022-1: [[EVD - ...]] uses no Hilbert features"`). `ygg impact NOTE` shows what rests on any
+note. When nothing is left to judge, `ygg resolve ID -m "how"`.
 
 **Papers** use `ygg:paper` (one paper as a Source plus what it means here) or `ygg:digest` (a whole paper
 broken into questions, claims and evidence). **Brainstorming** uses `ygg:brainstorm`; starting a project from

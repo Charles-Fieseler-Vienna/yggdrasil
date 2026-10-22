@@ -266,7 +266,7 @@ A project tree has a lab notebook, `NOTEBOOK.md` at its root (made by `ygg init`
 | Project tree | project repository | the graph of settled results, open questions and runs | when something settles |
 | Main tree | Yggdrasil-charlie | the compressed, generalizable part | at the end of a phase |
 
-Each entry is a `## YYYY-MM-DD HH:MM` heading, optionally `— tag` (`decision`, `dead-end`, `run`, `idea`, `handoff`), and free Markdown that links nodes as `[[...]]`. Entries are appended, newest last, and never edited or reordered; a correction is a new entry. ygg appends each entry in one write in append mode, so concurrent writers do not lose entries, and `ygg init` marks `NOTEBOOK.md` `merge=union` in `.gitattributes`, so git merges two machines' appends by keeping both. `ygg log` appends one; `ygg check` warns, without failing, about links to notes that do not exist. ygg never rewrites the notebook.
+Each entry is a `## YYYY-MM-DD HH:MM` heading, optionally `— tag` (`decision`, `dead-end`, `run`, `idea`, `handoff`), and free Markdown that links nodes as `[[...]]`. Entries are appended, newest last, and never edited or reordered; a correction is a new entry. The one change to a past entry is ticking a to-do's box (see [To-dos and issues](#to-dos-and-issues)). ygg appends each entry in one write in append mode, so concurrent writers do not lose entries, and `ygg init` marks `NOTEBOOK.md` `merge=union` in `.gitattributes`, so git merges two machines' appends by keeping both. `ygg log` appends one; `ygg check` warns, without failing, about links to notes that do not exist. ygg never rewrites the notebook; to tick a box it overwrites that one character in place.
 
 There is no separate decision log. A decision is first an entry; once it holds, it becomes a Claim (about a method, if it is one) with its Evidence, which may cite the entry's date.
 
@@ -285,6 +285,23 @@ with the host filled in, `jobs 123456` for cluster jobs (`--job`), and `for [[EV
 What can be checked is checked deterministically, on the run's own host only: whether each PID still runs and when each log was last written. A PID is checked through `/proc` where it exists, else `ps` (macOS has no `/proc`), else `kill -0`; a zombie (exited, not reaped) counts as ended, and so does a process that started after the run was logged, since its PID was reused. When nothing can tell, as in a sandbox that hides other processes, the run is "not checkable here", never "ended". Cluster jobs and runs on other hosts are listed, not checked; a container usually has its own hostname, so runs logged inside one count as on another host. `ygg log --pid` warns when the PID is not running where it is logged. Log paths are resolved where `ygg log` runs and stored relative to the tree's repository (absolute when outside it), so they mean the same on every clone. `ygg report` and the session hook give one summary line and a **Needs action** group: an ended run that nothing mentions yet, if it was logged since the last handoff, or `for` a note that is not done (whenever it was logged), and a running one whose logs have been quiet for two hours. `ygg runs` lists the runs still running or waiting to be looked at, with their logs (`--all` for every run, `ygg runs NOTE` for one note's), and `ygg show NOTE` lists a note's runs.
 
 `ygg watch [ID | NOTE ...]` blocks until the logged runs running on this machine (or those named) end, printing one line per event: a run ended, its log printed a failure (a Traceback, an `...Error`, Killed, out of memory, `nan`...; new lines only), or its log went quiet; then the Needs action lines. It is plain output, so any agent harness can run it in the background and be woken when it returns (`--first` to return at the first end, `--timeout HOURS`). It ends with the session that started it; the next session starts it again if runs are still going.
+
+### To-dos and issues
+
+A **to-do** is a Markdown task line in any entry, `- [ ] text`, which Obsidian and GitHub render as a checkbox; it is done once ticked, `- [x]`. `ygg log [TEXT] --todo "..."` (repeatable) writes them, alone or under the entry's text; `ygg tick TEXT [-m NOTE]` ticks the one open to-do containing TEXT (refusing if none or several do), and with `-m` appends a `done` entry saying what came of it. `ygg report` lists the open to-dos, newest first, and the session hook counts them. To-dos are the notebook's small next steps; a next step that is itself an experiment is a planned Evidence note instead.
+
+An **issue** is a problem found in something results rest on: a bug in the code, bad frames in a recording, a wrong preprocessing step in a Dataset. Invalidating everything downstream would usually throw away more than the problem touches, so an issue is a to-do that ygg follows through the tree:
+
+```
+- [ ] issue i261022-1 · affects [[DATA - 36-animal cohort]], [[@Stage 2 run]]
+```
+
+`ygg log "two recordings have all-NaN Hilbert features" --issue --affects NOTE` (repeatable) writes it and prints its id (`i` + date + a counter). The notes **resting on** the affected ones are what derive from them, the claims their evidence supports or opposes, and the questions following from those claims, recursively; `ygg impact NOTE...` lists them for any notes, and `ygg issues [ID] [--all] [--notes]` lists the open issues with how many of those notes are still to judge. Each one is judged, partly by the agent and partly by the user, in one of two ways:
+
+- **redone**: a new note supersedes it, made after the issue was logged (a note that replaces another under the issue, or is made after the issue, needs no judging itself);
+- **unaffected**: a later notebook line names the issue id and the note, saying why (`i261022-1: [[EVD - ...]] uses no Hilbert features`).
+
+A fixed Dataset is a new Dataset note superseding the old one. `ygg resolve ID... -m "how"` closes issues once judged: it appends a `resolved` entry ending in `resolved ID, ...` and ticks the issue's box, warning about any note not yet judged. A ticked box alone also counts as resolved. Open issues are listed in `ygg report`, in the session hook, and in the web app, where each note still to judge carries a badge.
 
 ## Workflows
 
@@ -319,6 +336,17 @@ Runs are launched and logged first; a node comes later, if at all. Each one ends
 
 Any mention of the run id after it was logged marks it looked at. Runs nobody mentions are flagged only until the next handoff; after that they stay in the notebook as plain record.
 
+### A bug in data or code
+
+A problem found in something results rest on is rarely a reason to redo everything below it, but every result below it has to be judged.
+
+1. **Log it** as an issue as soon as it is found, naming the notes it touches: `ygg log "..." --issue --affects "DATA - ..."`. Fixing it may come later; the record comes first.
+2. **See what rests on it**: `ygg issues ID` lists every note to judge, with the path that puts it there.
+3. **Judge each note**, the agent proposing and the user deciding: rerun what the problem could change and supersede the old note with the new one (a fixed Dataset supersedes the old Dataset); for what it cannot change, write one notebook line naming the issue id and the note, with the reason. Runs for it are logged as usual.
+4. **Resolve** the issue when nothing is left to judge: `ygg resolve ID -m "how"`.
+
+Superseded notes stay in the tree as record. The web app hides them by default and shows the new note in their place.
+
 ## Tooling
 
 `scripts/ygg` is the only writer of notes and `relations.json` besides the Obsidian plugins' own UIs. It finds its tree by looking for `ygg.json` from the current directory up, or takes `--vault PATH`. The Claude Code plugin puts it on Claude's PATH as `ygg` (`bin/ygg`); for your own shell, `ln -s "$PWD/bin/ygg" ~/.local/bin/ygg`.
@@ -333,8 +361,12 @@ It is a [uv](https://docs.astral.sh/uv/) script: its first lines declare Python 
 | `ygg set NOTE [...]` | Changes fields or the body of an editable node, or a project's roots. |
 | `ygg done NOTE [--outcome X]` | Finishes and freezes a node. |
 | `ygg show NOTE` | Prints a note with its relations (and a claim's datasets), or a project with its members. |
-| `ygg report [--project P] [--since DATE\|handoff] [--all]` | Lists high-priority and in-progress work, open nodes, unanswered questions, low-confidence claims, notes in no project, and notes out of scope (apart from the work lists); with `--since`, also the notes changed and the notebook entries since then. Kept short: empty groups are left out and each lists its first 8 notes (`--all` for every one); runs get one summary line and a **Needs action** group (see [Runs](#runs)). |
-| `ygg log [TEXT] [--tag WORD] [--handoff] [--body FILE] [--pid N] [--job ID] [--log PATH] [--for NOTE]` | Appends a dated entry to the notebook (see [Notebook](#notebook)); with `--pid` or `--job`, logs a run and prints its id (see [Runs](#runs)). |
+| `ygg report [--project P] [--since DATE\|handoff] [--all]` | Lists high-priority and in-progress work, open nodes, unanswered questions, low-confidence claims, notes in no project, and notes out of scope (apart from the work lists); with `--since`, also the notes changed and the notebook entries since then; then the open to-dos and open issues. Kept short: empty groups are left out and each lists its first 8 notes (`--all` for every one); runs get one summary line and a **Needs action** group (see [Runs](#runs)). |
+| `ygg log [TEXT] [--tag WORD] [--handoff] [--body FILE] [--pid N] [--job ID] [--log PATH] [--for NOTE] [--todo TEXT] [--issue --affects NOTE]` | Appends a dated entry to the notebook (see [Notebook](#notebook)); with `--pid` or `--job`, logs a run and prints its id (see [Runs](#runs)); `--todo` adds to-do lines, `--issue` an issue line (see [To-dos and issues](#to-dos-and-issues)). |
+| `ygg tick TEXT [-m NOTE]` | Ticks the one open to-do containing TEXT. |
+| `ygg issues [ID] [--all] [--notes]` | Lists open issues and the notes resting on what they affect, judged or still to judge. |
+| `ygg impact NOTE...` | Lists the notes that rest on these, and how. |
+| `ygg resolve ID... [-m HOW]` | Closes issues, warning about notes not yet judged. |
 | `ygg runs [NOTE] [--all]` | Lists the runs still running or waiting to be looked at, with their logs. |
 | `ygg drop ID... [-m WHY] [--kill]` | Gives runs up, so nothing flags them again. |
 | `ygg watch [ID\|NOTE...] [--first] [--timeout H]` | Waits for runs to end, printing a line per end, failure or quiet log. |
@@ -369,6 +401,8 @@ The tool version (`ygg --version`, also in `.claude-plugin/plugin.json`) and the
 
 `ygg serve` serves a web app at `http://localhost:8765/` (`--port`, `--open` to open the browser) until Ctrl-C.
 
+Its first job is transparency: the user sees the project's history and its next steps, and everything the CLI and hooks put in front of the agent as work to do is visible here too, built by the same functions. Steering (changing priorities, ticking to-dos, adding and linking notes) comes second, and every change still goes through `ygg`.
+
 - The server is a FastAPI app in `scripts/ygg_server.py`, run by uvicorn. It rebuilds the graph from the files on every read, keeping no cache.
 - The page is in `scripts/web/`: React with [React Flow](https://reactflow.dev) for the graph. Each module is small: `graph.js` (what is shown; pure functions), `layout.js` (positions), `animate.js` (moving between layouts), `api.js`, `note.js` (the card), `edges.js` (the relation curves), `toolbar.js`, `panel.js`, `dialogs.js` and `main.js` (state). There is no build step. The libraries load from esm.sh at pinned versions through an import map, and `htm` stands in for JSX.
 
@@ -380,7 +414,22 @@ The layout is a tidy tree, one column per level, with each node's children in a 
 
 Alt-click a node (or **Focus** in the side panel) to make it the view's only root: the view shows just it and what is under it, unfolded one level. A breadcrumb above the graph shows the trail of notes focused from the top, with **↑ Up** (focus on the note above), **Reset** (the whole tree, folded to the default) and links to each note on the trail. Alt-clicking a note under the focus extends the trail; anything else starts a new one from its shortest path to a top root.
 
-The **Show** menu filters the notes themselves: **In progress**, **Not done**, **Gaps**, **Out of scope**, **Weak** (low or refuted confidence, a failed or ambiguous outcome), **Changed since…** a date, or **Field…**, any frontmatter field holding a value (or any value). The matches are shown with every note above them up to the roots, faded, for context, and nothing else; folding is set aside, and ctrl-click shows or hides a note's other children. With nothing selected, the side panel lists the matches, most recently changed first. This is the catch-up view for a project: pick the project, then In progress or Not done.
+With nothing selected, the side panel is the **Overview** (also the toolbar button), where things stand as the agent is told it:
+
+- **What the agent sees first**: the notes the session hook names (in progress, high priority and not done) and those named in the last handoff, whose text the agent reads; each with a priority menu, so setting a note to high puts it on the agent's list, and lowering it takes it off;
+- the open **to-dos** of the notebook, newest first, each with a box that ticks it (`ygg tick`);
+- the open **issues**, each with the notes still to judge;
+- **runs**: the summary line and the Needs action lines;
+- the **last handoff**, rendered, and the latest notebook entries;
+- the agent's **briefing**, word for word as the SessionStart hook gives it, folded away.
+
+The notebook itself is written with `ygg log`, not here.
+
+The **Show** menu filters the notes themselves: **What the agent sees first** (as above), **Frontier**, **In progress**, **Not done**, **Gaps**, **Out of scope**, **Weak** (low or refuted confidence, a failed or ambiguous outcome), **Changed since…** a date, or **Field…**, any frontmatter field holding a value (or any value). The matches are shown with every note above them up to the roots, faded, for context, and nothing else; folding is set aside, and ctrl-click shows or hides a note's other children. With nothing selected, the side panel lists the matches, most recently changed first. This is the catch-up view for a project: pick the project, then In progress or Not done.
+
+**Frontier: the ways forward** turns the view around. Instead of everything from the roots down, it shows only the notes that are open or in progress, and the gaps, leaving out superseded notes and those at priority `none`. Done notes are removed, not faded. A note whose parents are all done becomes a root, says on its card which done note it comes after, and the roots are ordered high priority first, then in progress, then under an open issue. Clicking through to a note that is not on the frontier returns to the whole tree.
+
+**Superseded** notes are a toggle beside the types, off by default: while they are hidden, the note replacing each takes its place, with its parents and children, so the tree shows the current state. Shown, they are faded and struck through. Notes still to judge under an open issue carry a purple **!** badge (the panel says which issue and what to do), and the **Under an open issue** filter finds them. High-priority notes carry an orange **▲** badge.
 
 Fold state, focus trail, filters and the project choice are kept in the browser per vault. The toolbar filters by project and type, finds a note (unfolding a path down to it), and folds to the default or unfolds everything.
 
@@ -388,11 +437,11 @@ Selecting a node shows its fields, its relations and its body, with a link to op
 
 - **Connect to…**, then click another node: offers only the relations allowed between the two types, either way round, and not already present;
 - **New note here**: a node of any type that can relate to the selected one, created with its relation in one step (so never an orphan). The title is a short name that is also the filename (so no `?` or `:`); the body has one optional box per section of the type, each with a hint of what goes there;
-- **Set…** (status, confidence) and **Mark done…** (with an outcome for evidence) on editable notes;
+- a **priority** menu in the fields, which applies at once, and **Set…** (status, confidence) and **Mark done…** (with an outcome for evidence) on editable notes;
 - **×** on a relation removes it, unless either end is done;
 - **New root question** adds a question to a project's roots.
 
-Every change runs the matching CLI command (`new`, `link`, `unlink`, `set`, `done`) in the server, so it passes the same checks, and a refusal is shown as that command's error. The server watches `tree/`, `ideas/` and `relations.json` and pushes a new version to the page (server-sent events at `/api/events`) when any changes, so edits made in Obsidian or with the CLI appear at once.
+Every change runs the matching CLI command (`new`, `link`, `unlink`, `set`, `done`, `tick`) in the server, so it passes the same checks, and a refusal is shown as that command's error. The server watches `tree/`, `ideas/`, `relations.json` and `NOTEBOOK.md` and pushes a new version to the page (server-sent events at `/api/events`) when any changes, so edits made in Obsidian or with the CLI appear at once.
 
 The server listens on 127.0.0.1 only, refuses requests whose `Host` is not `localhost` or `127.0.0.1` (against DNS rebinding), and requires a random per-run token, embedded in the page it serves, on every API call (the `X-Ygg-Token` header, or `?t=` for the event stream, which cannot send headers), so other web pages cannot read or change the tree.
 
@@ -411,7 +460,7 @@ claude plugin install ygg@yggdrasil
 |---|---|
 | `bin/ygg` | The `ygg` command on Claude's PATH. |
 | `hooks/post_bash.py` | After a Bash command, in a repository with a tree: if it launched a run (`nohup`, `sbatch`, a trailing `&`, a background command...), reminds Claude to log it with its PID, host and logs; if it committed and the notebook has no entry from the last 20 minutes, reminds Claude to log any decision or result. Silent elsewhere. |
-| `hooks/session_start.py` | At session start, looks for a tree at or above the working directory, else up to three levels below it. If it finds one, it adds the rules in brief (load `ygg:tree`, change notes only with `ygg`, keep the notebook and log runs, offer a handoff, brainstorm, seed and compress) and where the work stands: counts, in-progress and high-priority notes, the last handoff and how many entries followed it, the runs named since, and a tree in another format. Elsewhere it prints nothing. |
+| `hooks/session_start.py` | At session start, looks for a tree at or above the working directory, else up to three levels below it. If it finds one, it adds the rules in brief (load `ygg:tree`, change notes only with `ygg`, keep the notebook and log runs, offer a handoff, brainstorm, seed and compress) and where the work stands: counts, in-progress and high-priority notes, the last handoff and how many entries followed it, open issues and the number of open to-dos, the runs named since, and a tree in another format. The web app's Overview shows the same, word for word. Elsewhere it prints nothing. |
 | `ygg:seed` | Starts a project tree from main-tree questions with `ygg seed`, then expands them into sub-questions and planned runs. |
 | `ygg:tree` | The working rules: the one rule, commands and allowed relations, runs, superseding, compression, the notebook, and how to write nodes. |
 | `ygg:paper` | Adds one paper as a Source (from Zotero) and records what it means for a project as Evidence. |

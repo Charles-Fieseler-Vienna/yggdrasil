@@ -2,14 +2,15 @@
 
 Reads build the graph from the files on every request. Writes run the ygg CLI in a
 subprocess, so they pass exactly the checks the CLI applies. /api/events pushes a new
-version whenever a note or relations.json changes, so edits made in Obsidian or with
-the CLI reach the page too. See DESIGN.md, "Web app".
+version whenever a note, relations.json or the notebook changes, so edits made in Obsidian
+or with the CLI reach the page too. See DESIGN.md, "Web app".
 """
 import asyncio
 import json
 import subprocess
 import sys
 import threading
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -21,26 +22,67 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from watchfiles import DefaultFilter, awatch
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
+HOOK = Path(__file__).resolve().parent.parent / "hooks" / "session_start.py"
 
 
 # --- Reading the tree ------------------------------------------------------------
 
 def tree_version(root):
-    """A token that changes whenever a note or relations.json does."""
+    """A token that changes whenever a note, relations.json or the notebook does."""
     stamps = [p.stat().st_mtime_ns for d in ("tree", "ideas") if (root / d).is_dir() for p in (root / d).glob("*.md")]
-    if (root / "relations.json").exists():
-        stamps.append((root / "relations.json").stat().st_mtime_ns)
+    for name in ("relations.json", "NOTEBOOK.md"):
+        if (root / name).exists():
+            stamps.append((root / name).stat().st_mtime_ns)
     return "%d-%d" % (len(stamps), max(stamps or [0]))
 
 
 HIDDEN_META = {"nodeTypeId", "nodeInstanceId", "projects"}  # sent as type, id and projects
+RECENT_ENTRIES = 8
+
+
+def overview_json(ygg, vault):
+    """Where the work stands, from the same functions the agent's briefing and `ygg report` use: the agent's
+    list, open to-dos and issues, runs that need someone, the last handoff and recent notebook entries, and
+    the briefing itself, word for word as the SessionStart hook gives it."""
+    root = vault.root
+    entries = ygg.notebook_entries(root)
+    hand = [e for e in entries if "handoff" in e["tag"].lower()]
+    by_stem = {n.stem: n.uid for n in vault.nodes.values()}
+    found = ygg.run_states(vault)
+    issues = [{"id": i["id"], "when": i["when"], "title": i["title"],
+               "notes": [{"stem": stem, "id": by_stem.get(stem), "how": how, "via": via}
+                         for stem, via, how, judged in i["notes"] if not judged],
+               "judged": sum(1 for n in i["notes"] if n[3]), "affects": i["affects"]}
+              for i in ygg.issue_states(vault) if not i["resolved"]]
+    try:
+        hook = SourceFileLoader("ygg_session_start", str(HOOK)).load_module()
+        briefing = "\n".join(hook.summary(ygg, root, root))
+    except Exception as e:  # the plugin's hook is not next to this copy of ygg
+        briefing = "(could not build the briefing: %s)" % e
+    return {"agenda": [{"id": by_stem[s], "stem": s, "why": why} for s, why in sorted(ygg.agenda(vault).items())],
+            "todos": [t for t in ygg.all_todos(root) if not t["done"]],
+            "issues": issues,
+            "runs": ygg.runs_summary(found), "needs_action": ygg.needs_action(vault, found),
+            "handoff": hand[-1] if hand else None,
+            "entries": [{"when": e["when"], "tag": e["tag"], "first": (e["text"].splitlines() or [""])[0][:160]}
+                        for e in entries[-RECENT_ENTRIES:]][::-1],
+            "briefing": briefing}
 
 
 def graph_json(ygg, vault):
     flags = ygg.node_flags(vault)
+    issues = {}  # stem -> open issues whose notes to judge include it
+    for i in ygg.issue_states(vault):
+        if not i["resolved"]:
+            for stem, via, how, judged in i["notes"]:
+                if not judged:
+                    issues.setdefault(stem, []).append({"id": i["id"], "title": i["title"]})
+    old = {d.stem for rel, s, d in vault.edges() if rel == "supersedes"}
+    first = ygg.agenda(vault)
     nodes = [{"id": n.uid, "stem": n.stem, "title": n.content, "type": n.type, "status": n.status,
               "confidence": n.meta.get("confidence"), "outcome": n.meta.get("outcome"),
-              "flag": flags.get(n.stem),
+              "flag": flags.get(n.stem), "issues": issues.get(n.stem, []), "superseded": n.stem in old,
+              "agenda": first.get(n.stem, []),
               "projects": [ygg.unlink_name(p) for p in n.meta.get("projects") or []],
               "file": n.path.relative_to(vault.root).as_posix(),
               "meta": {k: v for k, v in n.meta.items() if k not in HIDDEN_META}}
@@ -53,7 +95,8 @@ def graph_json(ygg, vault):
                 for stem, p in sorted(vault.projects.items())]
     schema = {"types": {t: {k: v[k] for k in ("name", "prefix", "color", "sections")} for t, v in ygg.TYPES.items()},
               "relations": {r: {"label": v[0], "complement": v[1], "pairs": v[3]} for r, v in ygg.RELATIONS.items()},
-              "confidence": ygg.CONFIDENCE, "outcomes": ygg.OUTCOMES, "statuses": ["open", "in-progress"]}
+              "confidence": ygg.CONFIDENCE, "outcomes": ygg.OUTCOMES, "statuses": ["open", "in-progress"],
+              "priorities": ygg.PRIORITIES}
     return {"vault": vault.root.name, "version": tree_version(vault.root), "nodes": nodes, "edges": edges,
             "projects": projects, "schema": schema, "errors": vault.errors}
 
@@ -82,10 +125,15 @@ class NewRelation(BaseModel):
 class NodeFields(BaseModel):
     status: Optional[str] = None
     confidence: Optional[str] = None
+    priority: Optional[str] = None
 
 
 class Done(BaseModel):
     outcome: Optional[str] = None
+
+
+class Tick(BaseModel):
+    text: str
 
 
 # --- The app ---------------------------------------------------------------------
@@ -124,7 +172,7 @@ class Tree:
 
 
 class TreeFilter(DefaultFilter):
-    """Changes to notes and relations.json; not .obsidian/ or editor temp files."""
+    """Changes to notes, relations.json and the notebook; not .obsidian/ or editor temp files."""
 
     def __init__(self, root):
         super().__init__()
@@ -133,7 +181,7 @@ class TreeFilter(DefaultFilter):
     def __call__(self, change, path):
         rel = Path(path).relative_to(self.root).as_posix()
         return super().__call__(change, path) and (
-            rel == "relations.json" or (rel.startswith(("tree/", "ideas/")) and rel.endswith(".md")))
+            rel in ("relations.json", "NOTEBOOK.md") or (rel.startswith(("tree/", "ideas/")) and rel.endswith(".md")))
 
 
 def create_app(ygg, root, token):
@@ -158,6 +206,14 @@ def create_app(ygg, root, token):
     @api.get("/graph")
     def get_graph():
         return graph_json(ygg, tree.vault())
+
+    @api.get("/overview")
+    def get_overview():
+        return overview_json(ygg, tree.vault())
+
+    @api.post("/todos/tick")
+    def tick_todo(q: Tick):
+        return {"message": tree.run("tick", q.text)}
 
     @api.get("/notes/{uid}")
     def get_note(uid: str):
@@ -189,7 +245,7 @@ def create_app(ygg, root, token):
     @api.patch("/notes/{uid}")
     def set_fields(uid: str, q: NodeFields):
         argv = ["set", uid]
-        for k in ("status", "confidence"):
+        for k in ("status", "confidence", "priority"):
             if getattr(q, k):
                 argv += ["--" + k, getattr(q, k)]
         tree.run(*argv)

@@ -6,7 +6,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { createRoot } from "react-dom/client";
 import { Background, Controls, MiniMap, ReactFlow, ReactFlowProvider, useReactFlow } from "@xyflow/react";
 import { api, storage, watchVersion } from "./api.js";
-import { computeView, defaultUnfolded, descendants, downPath, filterMatches, indexGraph, pathTo, structure } from "./graph.js";
+import { FILTERS, computeView, defaultUnfolded, descendants, downPath, filterMatches, indexGraph, pathTo, structure, supersededBy } from "./graph.js";
 import { bounds } from "./layout.js";
 import { useAnimatedLayout } from "./animate.js";
 import { html } from "./html.js";
@@ -23,7 +23,7 @@ function App() {
   const [G, setG] = useState(null);
   window.__G = G;  // for tests and the console
   const [unfolded, setUnfolded] = useState(null);   // null: the default for the current filters
-  const [hiddenTypes, setHiddenTypes] = useState(new Set());
+  const [hiddenTypes, setHiddenTypes] = useState(new Set(["superseded"]));
   const [project, setProject] = useState("");
   const [filter, setFilterState] = useState(null);   // {kind, since, key, value}, see FILTERS
   const [filterUnfolded, setFilterUnfolded] = useState(new Set());  // notes whose other children a filter shows
@@ -42,7 +42,8 @@ function App() {
       if (!prev) {
         const saved = storage.get(g.vault, "view") || {};
         if (saved.unfolded) setUnfolded(new Set(saved.unfolded));
-        setHiddenTypes(new Set(saved.hiddenTypes || []));
+        // views saved before superseded notes could be hidden (no v) start with them hidden too
+        setHiddenTypes(new Set(saved.v ? saved.hiddenTypes : (saved.hiddenTypes || []).concat(["superseded"])));
         setProject(saved.project || "");
         setTrail(saved.trail || []);
         setFilterState(saved.filter || null);
@@ -70,14 +71,16 @@ function App() {
 
   // --- The view ---
 
-  const s = useMemo(() => G && structure(G, hiddenTypes, project), [G, hiddenTypes, project]);
+  const spec = filter && FILTERS[filter.kind];
+  const restrict = spec && spec.restrict ? (n) => spec.test(n, filter) : null;  // the frontier: only its notes
+  const s = useMemo(() => G && structure(G, hiddenTypes, project, restrict), [G, hiddenTypes, project, restrict && filter.kind]);
   const unf = useMemo(() => unfolded || (s ? defaultUnfolded(G, s) : new Set()), [unfolded, s]);
   const foc = trail.length && s && trail.every((id) => s.inSet.has(id)) ? trail[trail.length - 1] : null;
   const matches = useMemo(() => s && filterMatches(G, s, filter), [s, filter]);
   const view = useMemo(() => s && computeView(G, s, unf, foc, matches && { matches, unfolded: filterUnfolded }),
                        [s, unf, foc, matches, filterUnfolded]);
   useEffect(() => {
-    if (G) storage.set(G.vault, "view", { unfolded: unfolded && [...unfolded], hiddenTypes: [...hiddenTypes], project, trail, filter });
+    if (G) storage.set(G.vault, "view", { v: 2, unfolded: unfolded && [...unfolded], hiddenTypes: [...hiddenTypes], project, trail, filter });
   }, [G && G.vault, unfolded, hiddenTypes, project, trail, filter]);
 
   // Once a new layout is placed: fit the viewport to it, or centre a note, as the change asked.
@@ -149,10 +152,12 @@ function App() {
   const reveal = (id, g = G, alsoUnfold = []) => {
     const n = g.byId.get(id);
     if (!n) return;
-    const types = new Set([...hiddenTypes].filter((t) => t !== n.type));
+    const old = supersededBy(g).has(id);  // a superseded note is shown by showing superseded notes
+    const types = new Set([...hiddenTypes].filter((t) => t !== n.type && !(old && t === "superseded")));
     const proj = project && !n.projects.includes(project) ? "" : project;
     const s2 = structure(g, types, proj);
     if (foc && !(s2.inSet.has(foc) && descendants(s2, foc).has(id))) setTrail([]);
+    if (restrict && !restrict(n)) setFilterState(null);  // not on the frontier: back to the whole tree
     const next = new Set(unfolded || defaultUnfolded(g, s2));
     const path = pathTo(s2, id).slice(0, -1).concat(alsoUnfold);
     for (const x of path) next.add(x);
@@ -197,8 +202,17 @@ function App() {
     }
   };
 
-  const action = (kind) => {
+  const action = async (kind, value, id = selected) => {
     if (kind === "connect") return setConnectFrom(selected);
+    if (kind === "priority" || kind === "tick") {
+      try {
+        if (kind === "tick") await api.tick(value); else await api.setFields(id, { priority: value });
+        await changed({ message: kind === "tick" ? "Ticked: " + value : "Priority set to " + value + "." });
+      } catch (err) {
+        setToast({ text: err.message, error: true });
+      }
+      return;
+    }
     setDialog(kind === "new" ? { kind, here: selected } : { kind, id: selected });
   };
 
@@ -228,7 +242,8 @@ function App() {
           if (matches) setFilterUnfolded(all); else setUnfolded(all);
         }}
         onFit=${() => flow.fitView({ padding: 0.12, duration: 250 })}
-        onNewRoot=${() => setDialog({ kind: "root", project })} />
+        onNewRoot=${() => setDialog({ kind: "root", project })}
+        onOverview=${() => { setSelected(null); setFilter(null); }} />
       <${Breadcrumb} G=${G} path=${foc ? trail : null} onFocus=${focusOn}
         onReset=${() => { after.current = { fit: true }; setTrail([]); setUnfolded(null); }} />
       <main>

@@ -77,3 +77,11 @@ def test_post_bash(tmp_path):
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     assert nudge(elsewhere, "sbatch run.sh") is None
+
+
+def test_session_start_lists_open_issues_and_todos(tmp_path):
+    root = make_repo(tmp_path / "proj")
+    run("--vault", root, "log", "Bad frames in two recordings.", "--issue", "--todo", "rerun the fits")
+    out = hook("session_start.py", {"cwd": str(root)})
+    assert "Open issue i" in out and "Bad frames in two recordings." in out
+    assert "1 open to-do in the notebook" in out

@@ -463,3 +463,103 @@ def test_log_paths_are_stored_relative_to_the_repository(tree):
     assert "· logs analysis/fit.log, /abs/elsewhere.log" in (tree / "NOTEBOOK.md").read_text()
     _, out = run("--vault", tree, "log", "x", "--pid", "999999999", cwd=tree)
     assert "is not running here" in out
+
+
+def test_todos_are_task_lines_ticked_in_place(populated, ygg):
+    ygg("log", "Fit converged.", "--todo", "rerun with H=50", "--todo", "plot the residuals")
+    ygg("log", "--todo", "ask about the cohort")
+    book = populated / "NOTEBOOK.md"
+    assert "\n- [ ] rerun with H=50\n- [ ] plot the residuals\n" in book.read_text()
+    _, out = ygg("report")
+    assert "## To do (3)" in out and "- [ ] ask about the cohort" in out
+    _, out = ygg("tick", "nothing like this", ok=False)
+    assert "no open to-dos match" in out
+    _, out = ygg("tick", "re", ok=False)  # rerun, residuals: say which
+    assert "2 open to-dos match" in out
+    size = len(book.read_bytes())
+    _, out = ygg("tick", "H=50")
+    assert "ticked: - [x] rerun with H=50" in out
+    assert len(book.read_bytes()) == size and "- [x] rerun with H=50\n- [ ] plot the residuals" in book.read_text()
+    ygg("tick", "residuals", "-m", "Plotted; nothing odd.")
+    assert "Done: plot the residuals" in book.read_text().split("\n## ")[-1]
+    _, out = ygg("report")
+    assert "## To do (1)" in out and "H=50" not in out.split("## To do")[1].split("##")[0]
+
+
+def test_an_issue_is_judged_note_by_note_then_resolved(populated, ygg, tmp_path):
+    _, out = ygg("issues")
+    assert "No open issues" in out
+    _, out = ygg("impact", "Head run")
+    assert "2 notes rest on [[@Head run]]" in out
+    assert "[[CLM - Head bending is continuously driven]]" in out and "is supported by" in out
+    _, out = ygg("log", "x", "--affects", "Head run", ok=False)
+    assert "add --issue" in out
+    _, out = ygg("log", "Two recordings are all NaN.", "--issue", "--affects", "Head run")
+    iid = re.search(r"issue id: (i\d{6}-\d+)", out).group(1)
+    assert "- [ ] issue %s · affects [[@Head run]]" % iid in (populated / "NOTEBOOK.md").read_text()
+    _, out = ygg("issues")
+    assert iid in out and "3 of 3 notes" in out and "still to judge" in out
+    _, out = ygg("report")
+    assert "## Open issues (1)" in out
+    # the evidence is redone (supersede), the claim is judged unaffected in the notebook
+    ygg("new", "evidence", "Innovations travel down the body on clean recordings", "--body", body(tmp_path, EVIDENCE),
+        "--link", "supersedes:Innovations travel down the body", "--link", "derived-from:Head run",
+        "--confidence", "medium")
+    ygg("log", "%s: [[CLM - Head bending is continuously driven]] still holds on the clean recordings." % iid)
+    _, out = ygg("issues", iid)
+    assert "superseded by [[EVD - Innovations travel down the body on clean recordings]]" in out
+    assert "[[CLM - Head bending is continuously driven]] (is supported by" in out and ": noted" in out
+    assert "[[@Head run]]: to judge" in out and "clean recordings]] (is derived from [[@Head run]]): replaces" in out
+    _, out = ygg("resolve", iid, "-m", "Recordings dropped from the cohort.")
+    assert "1 note resting on %s has not been judged" % iid in out
+    assert "- [x] issue %s" % iid in (populated / "NOTEBOOK.md").read_text()
+    _, out = ygg("issues")
+    assert "No open issues" in out
+    _, out = ygg("issues", "--all")
+    assert iid in out and "resolved" in out
+    _, out = ygg("resolve", "i000101-9", ok=False)
+    assert "no issue i000101-9" in out
+    _, out = ygg("check")
+    assert "0 errors" in out
+
+
+def test_ticking_an_issue_box_resolves_it(tree, ygg):
+    _, out = ygg("log", "Clock drift in the rig.", "--issue")
+    iid = re.search(r"issue id: (i\d{6}-\d+)", out).group(1)
+    _, out = ygg("tick", iid, ok=False)  # tick is for to-dos; issues close with resolve
+    assert "no open to-dos match" in out
+    book = tree / "NOTEBOOK.md"
+    book.write_text(book.read_text().replace("- [ ] issue", "- [x] issue"))
+    _, out = ygg("issues")
+    assert "No open issues" in out
+
+
+def test_agenda_is_what_a_session_is_pointed_at(populated, ygg):
+    from importlib.machinery import SourceFileLoader
+    y = SourceFileLoader("ygg_agenda", str(ROOT / "scripts" / "ygg")).load_module()
+    ygg("new", "question", "Next question", "--link", "follows-from:Head bending", "--priority", "high")
+    ygg("new", "question", "Parked question", "--link", "follows-from:Head bending", "--status", "in-progress")
+    ygg("log", "Next up: [[QUE - Next question]], after [[CLM - Head bending is continuously driven]].", "--handoff")
+    first = y.agenda(y.Vault(populated))
+    assert first == {"QUE - Next question": ["high priority", "named in the last handoff"],
+                     "QUE - Parked question": ["in progress"],
+                     "CLM - Head bending is continuously driven": ["named in the last handoff"]}
+
+
+def test_watch_flags_nan_losses_not_every_nan():
+    from importlib.machinery import SourceFileLoader
+    y = SourceFileLoader("ygg_fail", str(ROOT / "scripts" / "ygg")).load_module()
+    for line in ("epoch 3 loss=nan", "train_loss: NaN", "grad_norm nan", "NaN detected in layer 2",
+                 "Traceback (most recent call last):", "ValueError: bad shape", "Killed"):
+        assert y.FAIL_RE.search(line), line
+    for line in ("[00] worm5: hilbert_nan=1.0000 med_freq=nan", "nan_frac 0.02", "banana"):
+        assert not y.FAIL_RE.search(line), line
+
+
+def test_a_log_path_given_from_the_tree_folder_falls_back_to_the_repository(tmp_path):
+    root = make_repo(tmp_path / "proj", "research/tree")
+    (tmp_path / "proj" / "results").mkdir()
+    (tmp_path / "proj" / "results" / "fit.log").write_text("start\n")
+    _, out = run("log", "fit", "--pid", "1", "--log", "results/fit.log", cwd=root)
+    assert "using" in out and "from the repository's top" in out
+    assert "logs results/fit.log" in (root / "NOTEBOOK.md").read_text()

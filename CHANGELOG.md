@@ -5,8 +5,33 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
-## Unreleased
+## 0.4.0 (2026-10-22), tree format 2
 
+- To-dos: Markdown task lines in notebook entries, written with `ygg log --todo TEXT` and ticked with
+  `ygg tick TEXT` (which overwrites the one character in place, the only change ever made to a past entry).
+  `ygg report` lists the open ones, and the session hook counts them.
+- Issues, for problems in something results rest on (a bug, bad recordings): `ygg log --issue --affects NOTE`
+  writes an issue line with an id; `ygg issues` lists the notes resting on what it affects and which are still
+  to judge (rerun and superseded, or named with the issue id in a later notebook line); `ygg impact NOTE`
+  lists what rests on any note; `ygg resolve ID` closes it. Open issues appear in `ygg report`, `ygg show`, the
+  session hook and the web app.
+- Web app, transparency first: an **Overview** panel (with nothing selected) shows what the agent is told:
+  its list of notes (in progress, high priority, named in the last handoff), open to-dos (tickable), open
+  issues, runs needing action, the last handoff, recent entries, and the session briefing word for word.
+  It follows the notebook live.
+- Web app: priority can be set from the note panel and the Overview; high-priority notes carry a badge.
+- Web app: a **Frontier** filter shows only open notes and gaps, cut loose from the done notes above them;
+  a **What the agent sees first** filter; superseded notes are hidden by default, the note replacing each
+  taking its place (a toggle shows them, faded); notes under an open issue carry a badge.
+- DESIGN.md: a Workflows section for a bug in data or code, and the web app's purpose.
+
+### Fixes since 0.3.0
+
+- `ygg log --log PATH` given relative to the repository but run inside the tree's folder finds the log
+  at the repository's top, instead of recording a path that does not exist.
+- `ygg watch` no longer reports a failure for any `nan` in a log (a QC line printing `freq=nan`), only for
+  a NaN loss, gradient or objective, or "NaN detected/encountered".
+- `ygg:handoff` carries open to-dos over instead of writing them again (they were listed twice).
 - `--vault` is accepted after the command too (`ygg check --vault PATH`).
 - Evidence not yet done without a Source is planned work, flagged open, no longer a gap.
 - A run logged `--for` a note is no longer flagged (in `ygg report` or listed by `ygg runs`) once something mentions it, though its note is not done

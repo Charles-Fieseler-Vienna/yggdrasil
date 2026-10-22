@@ -46,8 +46,9 @@ def summary(ygg, root, cwd):
     lines.append("- `%s`: %d notes in %d project%s (%s)." % (
         where, len(nodes), len(vault.projects), "" if len(vault.projects) == 1 else "s",
         ", ".join(sorted(vault.projects)) or "none"))
-    running = [n.stem for n in nodes if n.status == "in-progress"]
-    high = [n.stem for n in nodes if n.meta.get("priority") == "high" and n.status != "done"]
+    first = ygg.agenda(vault)
+    running = [s for s, why in sorted(first.items()) if "in progress" in why]
+    high = [s for s, why in sorted(first.items()) if "high priority" in why]
     for title, group in (("In progress", running), ("High priority", high)):
         if group:
             lines.append("  %s: %s" % (title, "; ".join("[[%s]]" % s for s in group[:12])
@@ -65,6 +66,12 @@ def summary(ygg, root, cwd):
     elif entries:
         lines.append("  No handoff yet; the notebook has %d entries, the latest from %s."
                      % (len(entries), entries[-1]["when"]))
+    issues = [i for i in ygg.issue_states(vault) if not i["resolved"]]
+    for i in issues[:5]:
+        lines.append("  Open issue " + "\n  ".join(ygg.describe_issue(i))[2:])
+    todos = [t for t in ygg.all_todos(root) if not t["done"]]
+    if todos:
+        lines.append("  %d open to-do%s in the notebook (`ygg report` lists them)." % (len(todos), "" if len(todos) == 1 else "s"))
     found = ygg.run_states(vault)
     line = ygg.runs_summary(found)
     if line:

@@ -24,7 +24,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-__version__ = "0.3.0"  # the tool; keep .claude-plugin/plugin.json in step
+__version__ = "0.4.0"  # the tool; keep .claude-plugin/plugin.json in step
 # The tree format. Bump it when a tree written by this ygg could fail the checks of an older one, and
 # teach `ygg init` to upgrade older trees; ygg.json records each tree's format as spec_version.
 SPEC_VERSION = 2  # 2: notes in no project are allowed (a warning, not an error)
@@ -1059,11 +1059,217 @@ def cmd_show(a):
         print("\n<!-- runs (generated) -->")
         for r in mine:
             print("\n".join(describe_run(r)))
+    hits = [(i, row) for i in issue_states(vault) if not i["resolved"] for row in i["notes"] if row[0] == n.stem]
+    if hits:
+        print("\n<!-- open issues (generated) -->")
+        for i, (stem, via, how, judged) in hits:
+            print("- %s: %s (%s)" % (i["id"], i["title"], judged or ("affected" if via is None else
+                                                                      "%s [[%s]]; to judge" % (how, via))))
+
+
+# --- To-dos and issues -----------------------------------------------------------------
+# A to-do is a Markdown task line anywhere in the notebook, `- [ ] text` (`ygg log --todo TEXT` writes
+# one); ticked, `- [x]`, it is done. Ticking a box, in Obsidian, an editor or with `ygg tick`, is the one
+# change allowed to a past entry; ygg does it by overwriting the one character, so appends are never lost.
+# Open to-dos are listed by the report whenever they were written, until ticked.
+#
+# An issue is a to-do for a bug or problem found in data, code or a method that may undermine results
+# already in the tree: `ygg log TEXT --issue --affects NOTE` ends the entry with
+#   - [ ] issue i261022-1 · affects [[DATA - 36-animal cohort]], [[@Stage 2 fit]]
+# What rests on the affected notes (what is derived from them, the claims their evidence supports or
+# opposes, follow-up questions of those claims) is to be judged, note by note: rerun and superseded, or
+# unaffected. A note counts as judged once a note created after the issue supersedes it, or a later
+# notebook entry names both the issue id and the note. `ygg resolve ID -m "what was done"` closes the
+# issue: it appends an entry ending in `resolved i261022-1` and ticks the issue's box (either one closes it).
+# Open issues are listed by the report and the session hook, until resolved.
+
+TODO_RE = re.compile(r"^[ \t]*[-*] \[([ xX])\] (.+)$", re.M)
+ISSUE_LINE_RE = re.compile(r"^[ \t]*(?:[-*] \[([ xX])\] )?issue (i\d{6}-\d+)(?: · affects (.*))?$", re.M)
+RESOLVED_LINE_RE = re.compile(r"^resolved ((?:i\d{6}-\d+(?:, )?)+)$", re.M)
+
+
+def new_issue_id(root):
+    base = "i%s-" % datetime.date.today().strftime("%y%m%d")
+    taken = {i["id"] for i in all_issues(root)}
+    k = 1
+    while base + str(k) in taken:
+        k += 1
+    return base + str(k)
+
+
+def all_issues(root):
+    """Every issue in the notebook, oldest first: {id, affects (stems), entry (index), when, title,
+    resolved (the resolving entry's text, or None)}."""
+    entries = notebook_entries(root)
+    out = []
+    for i, e in enumerate(entries):
+        for m in ISSUE_LINE_RE.finditer(e["text"]):
+            out.append({"id": m.group(2), "affects": [unlink_name(x.strip()) for x in (m.group(3) or "").split(",")
+                                                       if x.strip()],
+                        "entry": i, "when": e["when"], "title": (e["text"].splitlines() or [""])[0][:120],
+                        "resolved": "(box ticked)" if (m.group(1) or " ") != " " else None})
+    for e in entries:
+        for m in RESOLVED_LINE_RE.finditer(e["text"]):
+            for x in m.group(1).split(","):
+                for issue in out:
+                    if issue["id"] == x.strip():
+                        issue["resolved"] = RESOLVED_LINE_RE.sub("", e["text"]).strip()
+    return out
+
+
+def all_todos(root):
+    """Every to-do line in the notebook, oldest first: {text, done, when, entry}. Issue lines are left
+    to all_issues."""
+    out = []
+    for i, e in enumerate(notebook_entries(root)):
+        for m in TODO_RE.finditer(e["text"]):
+            if not ISSUE_LINE_RE.match(m.group(0)):
+                out.append({"text": m.group(2).strip(), "done": m.group(1) != " ", "when": e["when"], "entry": i})
+    return out
+
+
+def tick(root, match):
+    """Tick the one open task line for which match(line) holds, overwriting only the space in `[ ]`.
+    Returns the line, or dies if none or several match."""
+    path = Path(root) / NOTEBOOK
+    data = path.read_bytes()
+    hits = [m for m in re.finditer(rb"^[ \t]*[-*] \[ \] (.+)$", data, re.M) if match(m.group(0).decode("utf-8"))]
+    if len(hits) != 1:
+        die("%s open to-do%s match%s; name one exactly (`ygg report` lists them)" % (
+            "no" if not hits else len(hits), "" if len(hits) == 1 else "s", "es" if len(hits) == 1 else ""))
+    at = hits[0].start() + hits[0].group(0).index(b"[ ]") + 1
+    with path.open("r+b") as f:
+        f.seek(at)
+        f.write(b"x")
+    return hits[0].group(0).decode("utf-8").strip()
+
+
+def cmd_tick(a):
+    vault = open_vault(a)
+    line = tick(vault.root, lambda l: a.text.lower() in l.lower() and not ISSUE_LINE_RE.match(l))
+    print("ticked: %s" % line.replace("[ ]", "[x]", 1))
+    if a.note:
+        print("%s: %s" % (NOTEBOOK, append_entry(vault.root, "done", "%s\n\nDone: %s" % (
+            a.note.strip(), line.split("] ", 1)[1]))))
+
+
+def resting_on(vault, starts):
+    """{stem: (via stem, relation)} for the notes that rest on `starts`, recursively: notes derived from
+    them, claims their evidence supports or opposes, and questions that follow from those claims."""
+    rests = defaultdict(list)
+    for rel, s, d in vault.edges():
+        if rel == "derived-from":
+            rests[d.stem].append((s.stem, "is derived from"))
+        elif rel in ("supports", "opposes"):
+            rests[s.stem].append((d.stem, RELATIONS[rel][1]))
+        elif rel == "follows-from" and d.type == "claim":
+            rests[d.stem].append((s.stem, "follows from"))
+    found, frontier = {}, list(starts)
+    while frontier:
+        stem = frontier.pop(0)
+        for up, how in rests[stem]:
+            if up not in found and up not in starts:
+                found[up] = (stem, how)
+                frontier.append(up)
+    return found
+
+
+def issue_states(vault):
+    """all_issues, each with `notes`: [(stem, via, how, judged)] for the affected notes and all that rests
+    on them, where judged says how the note was judged (superseded by a later note, a replacement itself,
+    made after the issue, or named in a later notebook entry with the issue id), or is None (still to judge)."""
+    entries = notebook_entries(vault.root)
+    issues = all_issues(vault.root)
+    newer, older = defaultdict(list), defaultdict(list)
+    for rel, s, d in vault.edges():
+        if rel == "supersedes":
+            newer[d.stem].append(s)
+            older[s.stem].append(d.stem)
+    made = lambda n: str(n.meta.get("dateCreated") or "")[:16].replace("T", " ")
+    for issue in issues:
+        later = "\n".join(e["text"] for e in entries[issue["entry"] + 1:] if issue["id"] in e["text"])
+        starts = [s for s in issue["affects"] if s in vault.nodes]
+        rows = [(s, None, "affected") for s in starts]
+        rows += [(stem, via, how) for stem, (via, how) in resting_on(vault, starts).items()]
+        issue["notes"] = []
+        under = {r[0] for r in rows}
+        for stem, via, how in rows:
+            by = [x for x in newer[stem] if made(x) >= issue["when"]]
+            replaces = [x for x in older[stem] if x in under]
+            judged = ("superseded by [[%s]]" % by[0].stem if by else
+                      "replaces [[%s]]" % replaces[0] if replaces else
+                      "made after the issue" if made(vault.nodes[stem]) > issue["when"] else
+                      "noted" if "[[%s]]" % stem in later else None)
+            issue["notes"].append((stem, via, how, judged))
+    return issues
+
+
+def describe_issue(issue, full=False):
+    todo = [n for n in issue["notes"] if not n[3]]
+    head = "- %s (%s)%s: %s" % (issue["id"], issue["when"], ", resolved" if issue["resolved"] else "", issue["title"])
+    it = "it" if len(issue["affects"]) == 1 else "them"
+    lines = [head, "  affects %s: %d of %d notes (%s and what rests on %s) still to judge" % (
+        ", ".join("[[%s]]" % s for s in issue["affects"]), len(todo), len(issue["notes"]), it, it)
+             if issue["affects"] else "  affects no note named"]
+    if full:
+        for stem, via, how, judged in issue["notes"]:
+            lines.append("  - [[%s]]%s: %s" % (stem, "" if via is None else " (%s [[%s]])" % (how, via),
+                                                judged or "to judge"))
+    return lines
+
+
+def cmd_issues(a):
+    vault = open_vault(a)
+    issues = issue_states(vault)
+    if a.target:
+        issues = [i for i in issues if i["id"] == a.target] or die("no issue %s in the notebook" % a.target)
+    elif not a.all:
+        issues = [i for i in issues if not i["resolved"]]
+    if not issues:
+        print("No open issues%s." % ("" if a.all else " (`--all` lists resolved ones too)"))
+        return
+    for issue in issues:
+        print("\n".join(describe_issue(issue, full=bool(a.target) or a.notes)))
+        if issue["resolved"] and a.target:
+            print("  resolved: %s" % issue["resolved"].splitlines()[0][:200])
+
+
+def cmd_impact(a):
+    vault = open_vault(a)
+    starts = [vault.resolve(x).stem for x in a.notes]
+    found = resting_on(vault, starts)
+    if not found:
+        print("Nothing in the tree rests on %s." % ", ".join("[[%s]]" % s for s in starts))
+        return
+    print("%d note%s rest on %s:" % (len(found), "" if len(found) == 1 else "s", ", ".join("[[%s]]" % s for s in starts)))
+    for stem, (via, how) in found.items():
+        print("- %s (%s [[%s]])" % (describe(vault.nodes[stem]), how, via))
+
+
+def cmd_resolve(a):
+    vault = open_vault(a)
+    known = {i["id"]: i for i in all_issues(vault.root)}
+    missing = [x for x in a.ids if x not in known]
+    if missing:
+        die("no issue %s in the notebook (`ygg issues --all` lists them)" % ", ".join(missing))
+    open_notes = [n for i in issue_states(vault) if i["id"] in a.ids for n in i["notes"] if not n[3]]
+    if open_notes:
+        warn("%d note%s resting on %s %s not been judged (superseded, or named in a notebook line with the "
+             "issue id): %s" % (len(open_notes), "" if len(open_notes) == 1 else "s", ", ".join(a.ids),
+                                "has" if len(open_notes) == 1 else "have",
+                                ", ".join("[[%s]]" % n[0] for n in open_notes[:LIST_CAP])))
+    text = (a.reason or "").strip() or "Resolved."
+    head = append_entry(vault.root, "resolved", text + "\n\nresolved " + ", ".join(a.ids))
+    print("%s: %s" % (NOTEBOOK, head))
+    for iid in a.ids:
+        if not known[iid]["resolved"]:
+            tick(vault.root, lambda l, iid=iid: bool(ISSUE_LINE_RE.match(l)) and (" %s" % iid) in l)
 
 
 # --- Notebook --------------------------------------------------------------------
 # NOTEBOOK.md at the tree's root is the project's lab notebook: dated entries, appended and never
-# edited, newest last. ygg only appends to it (`ygg log`), reads entry headings and checks its links.
+# edited, newest last. ygg only appends to it (`ygg log`), reads entry headings and checks its links; the
+# one edit to a past entry is ticking a to-do's box (`tick`).
 
 NOTEBOOK = "NOTEBOOK.md"
 NOTEBOOK_HEAD = """# Notebook
@@ -1119,9 +1325,14 @@ def notebook_warnings(vault):
 def cmd_log(a):
     vault = open_vault(a)
     text = (a.text or "").strip() or (read_body(a.body).strip() if a.body else "")
-    if not text:
+    if not text and not a.todo:
         die("give the entry as an argument, or with --body FILE (or - for stdin)")
     tag = "handoff" if a.handoff else (a.tag or "").strip()
+    if a.todo:
+        if any("\n" in t for t in a.todo):
+            die("a --todo is one line")
+        text = (text + "\n\n" if text else "") + "\n".join("- [ ] " + t.strip() for t in a.todo)
+        tag = tag or "todo"
     rid = None
     if a.pid or a.job:
         bad = [x for x in a.pid if not x.isdigit()] + [x for x in a.pid + a.job + a.log if "," in x or " · " in x]
@@ -1138,12 +1349,24 @@ def cmd_log(a):
         tag = tag or "run"
     elif a.log or a.note:
         die("--log and --for describe a run; give its --pid (or --job) too")
+    iid = None
+    if a.issue:
+        affects = [vault.resolve(x).stem for x in a.affects]
+        iid = new_issue_id(vault.root)
+        text += "\n\n- [ ] issue %s%s" % (iid, " · affects " + ", ".join(wikilink(s) for s in affects) if affects else "")
+        tag = tag or "issue"
+    elif a.affects:
+        die("--affects names what an issue undermines; add --issue")
     head = append_entry(vault.root, tag, text)
     names = set(vault.nodes) | set(vault.projects)
     for target in inline_links(text):
         if target not in names:
             warn("[[%s]] does not exist" % target)
     print("%s: %s%s" % (NOTEBOOK, head, "\nrun id: %s (cite it where the result is recorded)" % rid if rid else ""))
+    if iid:
+        issue = next(i for i in issue_states(open_vault(a)) if i["id"] == iid)
+        print("issue id: %s (`ygg issues %s` lists what rests on it; `ygg resolve %s` closes it)" % (iid, iid, iid))
+        print("\n".join(describe_issue(issue)[1:]))
 
 
 def append_entry(root, tag, text):
@@ -1195,18 +1418,22 @@ def run_line(rid, pids, jobs, logs, note, host=None):
 
 
 def log_path(root, name):
-    """A log path as given to `ygg log` (relative to where it ran), stored relative to the tree's
-    repository so it means the same on every clone, or absolute if outside it."""
+    """A log path as given to `ygg log` (relative to where it ran, or failing that to the repository's top,
+    as when ygg runs inside the tree's folder), stored relative to the tree's repository so it means the
+    same on every clone, or absolute if outside it."""
     if name.startswith("~"):
         return name
-    path = Path(name)
-    full = path if path.is_absolute() else Path.cwd() / path
-    if not full.exists():
-        warn("log %s does not exist yet" % full)
     try:
         top = Path(git(root, "rev-parse", "--show-toplevel").strip())
     except (subprocess.CalledProcessError, OSError):
         top = Path(root)
+    path = Path(name)
+    full = path if path.is_absolute() else Path.cwd() / path
+    if not full.exists() and not path.is_absolute() and (top / path).exists():
+        warn("log %s is not here; using %s, from the repository's top" % (full, top / path))
+        full = top / path
+    elif not full.exists():
+        warn("log %s does not exist yet" % full)
     try:
         return os.path.normpath(full.resolve().relative_to(top.resolve()).as_posix())
     except ValueError:
@@ -1460,7 +1687,9 @@ def cmd_drop(a):
 # Log lines that mean a run has failed, whatever it says later. Broad on purpose: a false alarm costs a
 # look at the log; a missed crash looks just like a run still going.
 FAIL_RE = re.compile(r"Traceback \(most recent call last\)|\b[A-Z]\w*Error\b|\bKilled\b|[Oo]ut of memory|\bOOM\b|"
-                     r"Segmentation fault|core dumped|CUDA error|\bFAILED\b|\bCANCELLED\b|\bnan\b")
+                     r"Segmentation fault|core dumped|CUDA error|\bFAILED\b|\bCANCELLED\b|"
+                     # a NaN loss, not any nan printed (a QC line may report "freq=nan" on purpose)
+                     r"(?i:(?<![a-z])(loss|nll|elbo|objective|grad)\w*[^\n]{0,40}\bnan\b|\bnans? (detected|encountered)\b)")
 
 
 def cmd_watch(a):
@@ -1583,6 +1812,20 @@ def cmd_report(a):
         for e in shown:
             first = e["text"].splitlines()[0] if e["text"] else ""
             print("- %s%s: %s" % (e["when"], " — " + e["tag"] if e["tag"] else "", first[:100]))
+        print()
+    todos = [t for t in all_todos(vault.root) if not t["done"]]
+    if todos:
+        print("## To do (%d)" % len(todos))
+        for t in todos[-cap:] if cap else todos:
+            print("- [ ] %s (%s)" % (t["text"], t["when"][:10]))
+        if cap and len(todos) > cap:
+            print("- … and %d older (`--all`)" % (len(todos) - cap))
+        print()
+    issues = [i for i in issue_states(vault) if not i["resolved"]]
+    if issues:
+        print("## Open issues (%d)" % len(issues))
+        for i in issues[:cap]:
+            print("\n".join(describe_issue(i)))
         print()
     found = run_states(vault)
     line, action = runs_summary(found), needs_action(vault, found)
@@ -1975,6 +2218,24 @@ def node_flags(vault):
     return flags
 
 
+def agenda(vault):
+    """{stem: [reasons]} for the notes a new session is pointed at first (the SessionStart hook lists them,
+    and the web app's "What the agent sees first" shows them): in progress, high priority and not done, or
+    named in the last handoff, whose text the session reads."""
+    out = defaultdict(list)
+    for n in sorted(vault.nodes.values(), key=lambda n: n.stem):
+        if n.status == "in-progress":
+            out[n.stem].append("in progress")
+        if n.meta.get("priority") == "high" and n.status != "done":
+            out[n.stem].append("high priority")
+    hand = [e for e in notebook_entries(vault.root) if "handoff" in e["tag"].lower()]
+    for name in WIKILINK_RE.findall(hand[-1]["text"]) if hand else []:
+        stem = unlink_name(name.strip())
+        if stem in vault.nodes and "named in the last handoff" not in out[stem]:
+            out[stem].append("named in the last handoff")
+    return dict(out)
+
+
 # --- Web app -------------------------------------------------------------------
 
 def cmd_serve(a):
@@ -2086,7 +2347,34 @@ def main(argv=None):
     p.add_argument("--job", action="append", default=[], help="log a run: a cluster job id (repeatable)")
     p.add_argument("--log", action="append", default=[], help="the run's log file (repeatable)")
     p.add_argument("--for", dest="note", help="the note the run serves, when it already exists")
+    p.add_argument("--todo", action="append", default=[], help="add a to-do to the entry, `- [ ] TODO`, listed by "
+                   "the report until ticked (repeatable; alone, the entry is just the to-dos)")
+    p.add_argument("--issue", action="store_true", help="log an issue: a bug or problem in data, code or a method "
+                   "that may undermine results in the tree, open until `ygg resolve`")
+    p.add_argument("--affects", action="append", default=[], help="a note the issue undermines, e.g. a Dataset "
+                   "or run Source (repeatable); what rests on it is listed to judge")
     p.set_defaults(func=cmd_log)
+
+    p = sub.add_parser("issues", help="list open issues and what rests on the notes they affect")
+    p.add_argument("target", nargs="?", help="one issue id, listed in full")
+    p.add_argument("--all", action="store_true", help="resolved issues too")
+    p.add_argument("--notes", action="store_true", help="list every note to judge")
+    p.set_defaults(func=cmd_issues)
+
+    p = sub.add_parser("impact", help="list the notes that rest on some notes (derived from them, claims "
+                       "their evidence supports, ...)")
+    p.add_argument("notes", nargs="+")
+    p.set_defaults(func=cmd_impact)
+
+    p = sub.add_parser("tick", help="tick a to-do in the notebook (`- [ ]` to `- [x]`)")
+    p.add_argument("text", help="a unique part of the to-do's text")
+    p.add_argument("--note", "-m", help="also log what came of it")
+    p.set_defaults(func=cmd_tick)
+
+    p = sub.add_parser("resolve", help="close issues, saying what was done")
+    p.add_argument("ids", nargs="+", help="issue ids, from `ygg issues`")
+    p.add_argument("--reason", "-m", help="what was done: what was rerun, what was judged unaffected")
+    p.set_defaults(func=cmd_resolve)
 
     p = sub.add_parser("drop", help="record that runs were given up (a pivot, a bug, a better idea), so nothing "
                        "flags them again")

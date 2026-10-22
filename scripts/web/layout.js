@@ -19,8 +19,9 @@ function lineCount(text, width) {
   return lines;
 }
 
-export function cardHeight(title, badge) {
-  return PAD_Y * 2 + lineCount(title, CARD_W - PAD_X * 2 - 4) * LINE_H + (badge ? BADGE_H : 0) + 8;  // + the widest flag border
+export function cardHeight(title, badge, from) {
+  return PAD_Y * 2 + lineCount(title, CARD_W - PAD_X * 2 - 4) * LINE_H + (badge ? BADGE_H : 0) + (from ? BADGE_H : 0)
+    + 8;  // + the widest flag border
 }
 
 // Which shown parent each node sits under. A node keeps the parent it had (prev), so unfolding
@@ -48,7 +49,7 @@ function chooseParents(view, prev) {
 // {id: {x, y, w, h, parent}} for the view's nodes, x and y being the top left corner; prev is the
 // last layout, whose parent choices are kept.
 export function layoutView(view, prev) {
-  const size = new Map(view.nodes.map((v) => [v.node.id, cardHeight(v.node.title, v.hidden.count)]));
+  const size = new Map(view.nodes.map((v) => [v.node.id, cardHeight(v.node.title, v.hidden.count, v.from.length)]));
   const parent = chooseParents(view, prev && Object.fromEntries(Object.entries(prev).map(([id, p]) => [id, p.parent])));
   const pos = {}, entered = new Set();
 

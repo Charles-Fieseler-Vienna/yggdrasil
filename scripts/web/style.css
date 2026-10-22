@@ -9,6 +9,8 @@
   --gap: #d32f2f;
   --open: #1e88e5;
   --weak: #e0a800;
+  --issue: #8e24aa;
+  --prio: #e65100;
   --edge: #8a9099;
   --supports: #2e8b3e;
   --opposes: #d32f2f;
@@ -113,6 +115,30 @@ main { flex: 1; display: flex; min-height: 0; }
 .note.flag-open { border: 2px dashed var(--open); }
 .note.flag-weak { border: 4px double var(--weak); }
 .note.flag-out { border: 2px dotted var(--muted); opacity: 0.7; }
+.note.superseded { opacity: 0.5; }
+.note.superseded .note-title { text-decoration: line-through; }
+.issue-badge { display: inline-block; min-width: 16px; height: 16px; line-height: 16px; border-radius: 8px;
+  background: var(--issue); color: #fff; font-size: 11px; font-weight: 700; text-align: center; }
+.note .issue-badge { position: absolute; top: -7px; right: -7px; }
+.prio-badge { display: inline-block; width: 16px; height: 16px; line-height: 15px; border-radius: 8px; text-align: center;
+  font-size: 9px; color: #fff; background: var(--prio); }
+.note .prio-badge { position: absolute; top: -7px; left: -7px; }
+.note.prio-none .note-title { opacity: .6; }
+.note-from { font-size: 11.5px; color: var(--muted); line-height: 16px; margin-top: 2px; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.panel select.inline { font: inherit; padding: 0 2px; }
+.overview-part { margin-bottom: 14px; }
+.overview li.agenda-item { display: block; }
+.overview li.agenda-item .muted { font-size: 12px; }
+.overview ul.todos { list-style: none; padding-left: 0; }
+.overview ul.todos li, .overview ul.entries li { margin: 4px 0; }
+.overview ul.entries { list-style: none; padding-left: 0; }
+.overview .issue p { margin: 4px 0; }
+.overview .briefing pre { white-space: pre-wrap; font-size: 11.5px; background: var(--bg); border: 1px solid var(--line);
+  padding: 8px; border-radius: 4px; }
+.overview .hint { margin-top: 18px; font-size: 12px; }
+.issues p { margin: 4px 0; font-size: 13px; }
+.superseded-chip { background: var(--line); color: var(--fg); }
 /* folded: a second card peeks out behind */
 .note.folded { --stack: 5px 5px 0 -1.5px var(--card), 5px 5px 0 0 color-mix(in srgb, var(--type) 70%, transparent); }
 .note.hidden-gaps { --ring: 0 0 0 7px color-mix(in srgb, var(--gap) 22%, transparent); }

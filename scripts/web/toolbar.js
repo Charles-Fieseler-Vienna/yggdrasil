@@ -29,7 +29,7 @@ function NoteFilter({ G, filter, setFilter, count }) {
 }
 
 export function Toolbar({ G, project, setProject, hiddenTypes, toggleType, filter, setFilter, matchCount, onFind,
-                          onFoldDefault, onUnfoldAll, onFit, onNewRoot }) {
+                          onFoldDefault, onUnfoldAll, onFit, onNewRoot, onOverview }) {
   const [query, setQuery] = useState("");
   const find = (value) => {
     if (onFind(value.trim())) setQuery("");
@@ -37,6 +37,7 @@ export function Toolbar({ G, project, setProject, hiddenTypes, toggleType, filte
   return html`
     <header className="toolbar">
       <strong className="vault">${G.vault}</strong>
+      <button onClick=${onOverview} title="Where things stand: the agent's list, to-dos, issues, runs, the last handoff">Overview</button>
       <select value=${project} onChange=${(e) => setProject(e.target.value)} title="Only this project's notes">
         <option value="">All projects</option>
         ${G.projects.map((p) => html`<option key=${p.id} value=${p.id}>${p.title}</option>`)}
@@ -47,6 +48,11 @@ export function Toolbar({ G, project, setProject, hiddenTypes, toggleType, filte
             <input type="checkbox" checked=${!hiddenTypes.has(t)} onChange=${() => toggleType(t)} />
             <span className="type-chip" style=${{ background: spec.color }}>${spec.name}</span>
           </label>`)}
+        <label className=${"type-toggle" + (hiddenTypes.has("superseded") ? " off" : "")}
+               title="Superseded notes; while hidden, each note replacing one takes its place">
+          <input type="checkbox" checked=${!hiddenTypes.has("superseded")} onChange=${() => toggleType("superseded")} />
+          <span className="type-chip superseded-chip">superseded</span>
+        </label>
       </span>
       <${NoteFilter} G=${G} filter=${filter} setFilter=${setFilter} count=${matchCount} />
       <input className="search" list="search-list" placeholder="Find a note…" value=${query}
@@ -63,7 +69,7 @@ export function Toolbar({ G, project, setProject, hiddenTypes, toggleType, filte
       <button onClick=${onFit}>Fit</button>
       <button onClick=${onNewRoot} title="A new question that is a root of a project">New root question</button>
       <span className="legend">
-        <span className="flag gap">gap</span><span className="flag open">open</span><span className="flag weak">weak</span><span className="flag out">out of scope</span>
+        <span className="flag gap">gap</span><span className="flag open">open</span><span className="flag weak">weak</span><span className="flag out">out of scope</span><span className="issue-badge">!</span> open issue <span className="prio-badge">▲</span> high priority
         <span className="hint">ctrl-click folds · alt-click focuses</span>
       </span>
     </header>`;

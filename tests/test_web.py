@@ -66,5 +66,37 @@ def test_page_shows_and_edits_the_tree(server):
         page.fill(".search", "QUE - Made from the CLI")  # search takes a full filename
         page.wait_for_timeout(1000)
         assert "Made from the CLI" in page.inner_text(".panel")
+        # the overview: what the agent is told, to-dos ticked from the page, priority set from the page
+        ygg = lambda *a: subprocess.run([str(ROOT / "bin" / "ygg"), "--vault", str(tree)] + list(a), check=True,
+                                        stdout=subprocess.PIPE)
+        ygg("log", "Next: [[QUE - Made from the CLI]].", "--handoff", "--todo", "plot the residuals")
+        page.click("text=Overview")
+        page.wait_for_selector(".overview .todos input", timeout=10000)
+        panel = page.inner_text(".panel")
+        assert "named in the last handoff" in panel and "plot the residuals" in panel
+        page.locator(".overview .todos input").first.click()
+        page.wait_for_function("() => !document.querySelector('.overview .todos')", timeout=10000)
+        assert "- [x] plot the residuals" in (tree / "NOTEBOOK.md").read_text()
+        page.select_option(".overview select.inline", "high")
+        page.wait_for_selector(".note .prio-badge", timeout=10000)
+        assert "priority: high" in (tree / "tree" / "QUE - Made from the CLI.md").read_text()
+        # the frontier: only open notes and gaps, cut loose from the done ones above them
+        page.select_option(".note-filter select", "frontier")
+        page.wait_for_timeout(1000)
+        assert page.locator(".react-flow__node").count() == 1
+        assert "after Head bending is continuously driven" in page.inner_text(".react-flow__node")
+        page.select_option(".note-filter select", "")
+        # superseded notes are hidden by default, their replacement taking their place
+        ygg("new", "evidence", "Innovations travel down the body, redone", "--link", "supersedes:Innovations travel",
+            "--link", "supports:Head bending")
+        page.wait_for_function("() => window.__G.byStem.has('EVD - Innovations travel down the body, redone')",
+                               timeout=10000)
+        page.click("text=Unfold all")
+        page.wait_for_timeout(1000)
+        assert page.locator(".react-flow__node", has_text="redone").count() == 1
+        assert page.locator(".react-flow__node", has_text="Innovations travel down the body").count() == 1
+        page.click(".superseded-chip")
+        page.wait_for_timeout(1000)
+        assert page.locator(".note.superseded").count() == 1
         browser.close()
         assert errors == []
