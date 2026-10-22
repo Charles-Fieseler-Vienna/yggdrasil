@@ -74,7 +74,8 @@ The scripts are not results, but they say exactly how each figure was made, whic
 
 ## 6. Write and finish
 
-Write what the user approved with `ygg` (bodies in scratch files), questions and sources first, then evidence,
-then claims. For a new project, write `## Summary` (the paper in two sentences, in the user's words) and
+Write what the user approved with `ygg` (bodies on stdin, `--body - <<'EOF'`): the root questions first, then
+the project with them as roots (so each later note joins it as it is made), then the other questions and the
+sources, then evidence, then claims. For a new project, write `## Summary` (the paper in two sentences, in the user's words) and
 `## Findings` citing the Claim nodes. Run `ygg check`, then summarise: the nodes made or reused, the scripts
 linked, and the open questions that are the natural next steps. Commit only when the user asks.

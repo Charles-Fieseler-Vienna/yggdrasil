@@ -170,6 +170,8 @@ def test_papers(tree, ygg):
     _, out = ygg("show", "zotero:2Q9B3YAH")
     assert "doi: 10.1234/ABC" in out
     ygg("new", "source", "A run", "--run", "repo@abc1234:fit.py", "--data", "results/fit", "--status", "done")
+    _, out = ygg("new", "source", "Owner run", "--run", "someone/repo@abc1234:fit.py", ok=False)
+    assert "the repository is its bare name: repo@abc1234:fit.py" in out
     assert "results/fit" in (tree / "tree" / "@A run.md").read_text()
 
 

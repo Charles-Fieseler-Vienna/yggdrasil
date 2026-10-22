@@ -5,6 +5,12 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
+## 0.5.12 (2026-10-23), tree format 2
+
+- A `run` or `tree` reference given as `owner/repository@commit:path` is refused with the bare form to use.
+- `ygg:digest`: make the project right after its root questions, so later notes join it as they are made;
+  bodies on stdin.
+
 ## 0.5.11 (2026-10-23), tree format 2
 
 - The prose-decision check works line by line: an entry citing one question no longer hides a second
