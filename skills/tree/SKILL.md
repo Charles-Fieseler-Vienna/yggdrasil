@@ -76,8 +76,9 @@ any background wait you started before you finish (a leftover one keeps a headle
 main-tree question (or claim) and everything under it, each copy recording its `origin`, and makes it a root;
 the `ygg:seed` skill also expands it into concrete sub-questions and planned runs.
 
-**Changing a conclusion.** Never edit a `done` node. Create a new node of the same type with
-`--link supersedes:OLD`, saying what changed and why, then update the project's Findings.
+**Changing a conclusion.** An open node is revised in place: `ygg set NOTE --body -` replaces its body
+(keep it current when new evidence changes it). Never edit a `done` node: create a new node of the same type
+with `--link supersedes:OLD`, saying what changed and why, then update the project's Findings.
 
 **Compressing a project into the main tree** (with the user, once the project tree is committed) uses
 `ygg:compress`.

@@ -5,6 +5,11 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
+## 0.5.14 (2026-10-23), tree format 2
+
+- `ygg:tree`: an open node's body is revised in place with `ygg set NOTE --body -`; only done nodes are
+  frozen (trial 31 left an open claim's body stale, believing open claims could not be edited).
+
 ## 0.5.13 (2026-10-23), tree format 2
 
 - `ygg log --log` without a PID says how to log a run that already ended in the foreground.
