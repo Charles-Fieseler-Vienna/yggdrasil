@@ -42,24 +42,7 @@ Yggdrasil-charlie/
 └── .obsidian/plugins/{discourse-graphs,tasknotes}/data.json   # plugin settings (written by `ygg init`)
 ```
 
-The tool:
-
-```text
-yggdrasil/
-├── .claude-plugin/   # plugin.json and marketplace.json (see Plugin)
-├── bin/ygg           # the command, put on Claude's PATH by the plugin
-├── hooks/            # the SessionStart, pre-Bash and post-Bash hooks
-├── skills/           # tree, seed, paper, digest, brainstorm, handoff, compress
-├── tests/            # pytest: the CLI, the hooks, the web app (optional)
-├── schema/
-│   └── dg-schema-yggdrasil.json   # the schema as a DG export, for manual import (`ygg schema`)
-├── scripts/
-│   ├── ygg           # the CLI
-│   ├── ygg_server.py # the web app's server
-│   └── web/          # the web app's page
-├── CLAUDE.md         # how to develop the tool
-└── DESIGN.md
-```
+The tool's own layout, and how to work on it, are in `DEVELOPING.md`.
 
 ## Node types
 
@@ -415,8 +398,7 @@ The tool version (`ygg --version`, also in `.claude-plugin/plugin.json`) and the
 
 Its first job is transparency: the user sees the project's history and its next steps, and everything the CLI and hooks put in front of the agent as work to do is visible here too, built by the same functions. Steering (changing priorities, ticking to-dos, adding and linking notes) comes second, and every change still goes through `ygg`.
 
-- The server is a FastAPI app in `scripts/ygg_server.py`, run by uvicorn. It rebuilds the graph from the files on every read, keeping no cache.
-- The page is in `scripts/web/`: React with [React Flow](https://reactflow.dev) for the graph. Each module is small: `graph.js` (what is shown; pure functions), `layout.js` (positions), `animate.js` (moving between layouts), `api.js`, `note.js` (the card), `edges.js` (the relation curves), `toolbar.js`, `panel.js`, `dialogs.js` and `main.js` (state). There is no build step. The libraries load from esm.sh at pinned versions through an import map, and `htm` stands in for JSX.
+It runs locally and needs the network for its libraries. How it is built is in `DEVELOPING.md`.
 
 The tree is drawn left to right parent → child: questions lead to their follow-ups, claims and informing evidence, claims to their evidence, evidence to its sources and datasets. Arrowheads mark each relation's real destination. Node colour is the type; the border marks gaps (red: a question nothing addresses or informs, a claim nothing supports, done evidence derived from nothing; planned evidence, not yet done, is not a gap), open or in-progress notes (dashed blue), weak ones (double yellow) and out-of-scope ones (dotted grey, faded). Notes in no project are shown whichever project is selected.
 
@@ -456,7 +438,7 @@ Selecting a node shows its fields, its relations and its body, with a link to op
 
 Every change runs the matching CLI command (`new`, `link`, `unlink`, `set`, `done`, `tick`) in the server, so it passes the same checks, and a refusal is shown as that command's error. The server watches `tree/`, `ideas/`, `relations.json` and `NOTEBOOK.md` and pushes a new version to the page (server-sent events at `/api/events`) when any changes, so edits made in Obsidian or with the CLI appear at once.
 
-The server listens on 127.0.0.1 only, refuses requests whose `Host` is not `localhost` or `127.0.0.1` (against DNS rebinding), and requires a random per-run token, embedded in the page it serves, on every API call (the `X-Ygg-Token` header, or `?t=` for the event stream, which cannot send headers), so other web pages cannot read or change the tree.
+The server listens on 127.0.0.1 only and accepts only API calls carrying a random token embedded in the page it serves, so other web pages cannot read or change the tree.
 
 A tree's repository can run `check` before each commit: the main tree has `.githooks/pre-commit`, enabled with `git config core.hooksPath .githooks`.
 
