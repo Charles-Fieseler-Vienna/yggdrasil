@@ -78,7 +78,8 @@ the `ygg:seed` skill also expands it into concrete sub-questions and planned run
 
 **Changing a conclusion.** An open node is revised in place: `ygg set NOTE --body -` replaces its body
 (keep it current when new evidence changes it). Never edit a `done` node: create a new node of the same type
-with `--link supersedes:OLD`, saying what changed and why, then update the project's Findings.
+with `--link supersedes:OLD`, saying what changed and why, then update the project's Findings. (A node marked
+`done` by mistake since the last commit can still be reopened: `ygg set NOTE --status open`.)
 
 **Compressing a project into the main tree** (with the user, once the project tree is committed) uses
 `ygg:compress`.

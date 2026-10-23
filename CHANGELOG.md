@@ -5,6 +5,12 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
+## 0.5.15 (2026-10-23), tree format 2
+
+- A note is frozen once it is committed as done, for the commands as for `ygg check`: one marked done since
+  the last commit (trial 33 closed a question by mistake) can be reopened with `ygg set NOTE --status open`,
+  which clears its `completedDate`.
+
 ## 0.5.14 (2026-10-23), tree format 2
 
 - `ygg:tree`: an open node's body is revised in place with `ygg set NOTE --body -`; only done nodes are

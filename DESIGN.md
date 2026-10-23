@@ -146,7 +146,7 @@ TaskNotes should be set to identify tasks by property (`taskIdentificationMethod
 
 `status` is the work state: `open` (proposed, not started), `in-progress` (being run or worked on), `done`.
 
-A note is editable while it is `open` or `in-progress`, and frozen once it is `done`, whatever its type. A `done` note is never rewritten; a new note of the same type `supersedes` it.
+A note is editable while it is `open` or `in-progress`, and frozen once it is committed as `done`, whatever its type. A `done` note is never rewritten; a new note of the same type `supersedes` it. Freezing is judged against the last commit, by `ygg check` and by the commands alike: a note marked `done` since then (by mistake, say) can still be reopened with `ygg set NOTE --status open`, which clears its `completedDate`. A done note copied by `ygg seed` is frozen from the start.
 
 ### Uncertainty
 

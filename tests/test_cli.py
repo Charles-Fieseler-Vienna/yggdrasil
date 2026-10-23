@@ -133,6 +133,20 @@ def test_done_notes_are_frozen(populated, ygg):
     assert "was done at HEAD and has been changed" in out
 
 
+def test_a_note_done_since_the_last_commit_can_be_reopened(populated, ygg):
+    ygg("new", "question", "Closed too soon", "--link", "follows-from:Is the head wave driven", "--body", "-",
+        stdin="## Question\n\nq\n")
+    ygg("done", "Closed too soon")
+    path = populated / "tree" / "QUE - Closed too soon.md"
+    ygg("set", "Closed too soon", "--status", "open")
+    text = path.read_text()
+    assert "status: open" in text and "completedDate" not in text
+    ygg("done", "Closed too soon")
+    commit(populated, "done for real")
+    _, out = ygg("set", "Closed too soon", "--status", "open", ok=False)
+    assert "done and frozen" in out
+
+
 def test_done_outcomes(populated, ygg, tmp_path):
     ygg("new", "evidence", "Pilot fit", "--body", body(tmp_path, EVIDENCE), "--link", "informs:Is the head wave driven")
     ygg("done", "Pilot fit", "--outcome", "inconclusive")  # an alias agents reach for
