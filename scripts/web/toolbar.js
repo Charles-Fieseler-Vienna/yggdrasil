@@ -29,7 +29,7 @@ function NoteFilter({ G, filter, setFilter, count }) {
 }
 
 export function Toolbar({ G, project, setProject, hiddenTypes, toggleType, filter, setFilter, matchCount, onFind,
-                          onFoldDefault, onUnfoldAll, onFit, onNewRoot, onOverview }) {
+                          onFoldDefault, onUnfoldAll, onFit, onResetPositions, onNewRoot, onOverview }) {
   const [query, setQuery] = useState("");
   const find = (value) => {
     if (onFind(value.trim())) setQuery("");
@@ -70,8 +70,9 @@ export function Toolbar({ G, project, setProject, hiddenTypes, toggleType, filte
       <button onClick=${onNewRoot} title="A new question that is a root of a project">New root question</button>
       <span className="legend">
         <span className="flag gap">gap</span><span className="flag open">open</span><span className="flag weak">weak</span><span className="flag out">out of scope</span><span className="issue-badge">!</span> open issue <span className="prio-badge">▲</span> high priority <span className="ask-badge">?</span> waiting on you
-        <span className="hint">ctrl-click folds · alt-click focuses</span>
+        <span className="hint">ctrl-click folds · alt-click focuses · drag moves a card · middle-drag pans</span>
       </span>
+      ${onResetPositions ? html`<button onClick=${onResetPositions} title="Put the cards you dragged back in their places">Reset positions</button>` : null}
     </header>`;
 }
 

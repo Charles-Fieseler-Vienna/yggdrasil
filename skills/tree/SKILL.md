@@ -30,6 +30,8 @@ absolute cluster path.
 ## Before writing
 
 1. `ygg report` (with `--project P`, `--since handoff`) for work in progress, priorities, open nodes, notes in no project, notes out of scope.
+   Its list "What a session looks at first", also in the session briefing, is most important first; the user
+   may have set that order (`ygg order`, theirs to change). Work down it unless the handoff says otherwise.
 2. Read the relevant project notes in `ideas/`; `ygg show NOTE` reads a note with its relations.
 3. Reuse existing nodes; relate to them rather than restating them.
 

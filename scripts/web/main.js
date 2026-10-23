@@ -18,6 +18,27 @@ import { DIALOGS } from "./dialogs.js";
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
+// Where a card's edges attach: mid-left in and mid-right out between columns; top and bottom, or the right
+// side, between cards in one column. Given to React Flow rather than measured (see the nodes below).
+function handles(w, h) {
+  const at = { left: [0, h / 2 - 0.5], right: [w - 1, h / 2 - 0.5], top: [w / 2 - 0.5, 0], bottom: [w / 2 - 0.5, h - 1] };
+  return [["target", "left"], ["target", "top"], ["target", "bottom"], ["target", "right"],
+          ["source", "right"], ["source", "top"], ["source", "bottom"]]
+    .map(([type, side]) => ({ id: side, type, position: side, x: at[side][0], y: at[side][1], width: 1, height: 1 }));
+}
+
+// The sides an edge leaves and enters by: right to left between columns. Within a column, bottom to top
+// when the two cards are next to each other, and out and back in on the right when other cards sit between.
+function sides(at, from, to) {
+  const a = at.get(from), b = at.get(to);
+  if (Math.abs(a.x - b.x) >= Math.min(a.w, b.w) / 2) return ["right", "left"];
+  const [top, bottom] = a.y < b.y ? [a, b] : [b, a];
+  const between = [...at.values()].some((c) => c !== a && c !== b && Math.abs(c.x - a.x) < a.w / 2 &&
+                                           c.y > top.y && c.y < bottom.y);
+  if (between) return ["right", "right"];
+  return a.y < b.y ? ["bottom", "top"] : ["top", "bottom"];
+}
+
 function App() {
   const flow = useReactFlow();
   const [G, setG] = useState(null);
@@ -32,6 +53,7 @@ function App() {
   const [connectFrom, setConnectFrom] = useState(null);
   const [dialog, setDialog] = useState(null);         // {kind, ...props}
   const [toast, setToast] = useState(null);           // {text, error}
+  const [offsets, setOffsets] = useState({});         // id -> {dx, dy}: where the user dragged a card, from its place in the layout
   const after = useRef({ fit: true });                // what the next layout should do: {anchor | fit | center}
 
   // --- Loading ---
@@ -47,6 +69,7 @@ function App() {
         setProject(saved.project || "");
         setTrail(saved.trail || []);
         setFilterState(saved.filter || null);
+        setOffsets(storage.get(g.vault, "offsets") || {});
       }
       return g;
     });
@@ -84,7 +107,9 @@ function App() {
   }, [G && G.vault, unfolded, hiddenTypes, project, trail, filter]);
 
   // Once a new layout is placed: fit the viewport to it, or centre a note, as the change asked.
-  const onPlaced = (to) => {
+  const onPlaced = (placed) => {
+    const to = {};
+    for (const [id, p] of Object.entries(placed)) to[id] = offsets[id] ? { ...p, x: p.x + offsets[id].dx, y: p.y + offsets[id].dy } : p;
     const todo = after.current;
     after.current = {};
     if (todo.center && to[todo.center]) {
@@ -97,25 +122,50 @@ function App() {
   const frame = useAnimatedLayout(view, s, after.current.anchor, onPlaced);
 
   const nodes = useMemo(() => frame.items.map((it) => ({
-    // A known size, so React Flow never hides a card to measure it again when its data changes.
-    id: it.id, type: "note", position: { x: it.x, y: it.y }, width: it.w, height: it.h,
+    // A known size and known handles (mid-left in, mid-right out), so React Flow never measures a card: it
+    // hides one to measure it when its data changes, forgets measured handles on every new node object (the
+    // animation makes one each frame) and draws no edge until it measures again, and drags to NaN without
+    // `measured`.
+    id: it.id, type: "note", width: it.w, height: it.h, measured: { width: it.w, height: it.h },
+    position: offsets[it.id] ? { x: it.x + offsets[it.id].dx, y: it.y + offsets[it.id].dy } : { x: it.x, y: it.y },
+    handles: handles(it.w, it.h),
     style: { opacity: it.opacity, pointerEvents: it.leaving ? "none" : undefined },
     data: { ...it.entry, w: it.w, h: it.h, color: G.schema.types[it.entry.node.type].color,
-            selected: it.id === selected, connecting: it.id === connectFrom },
-  })), [frame, selected, connectFrom]);
+            selected: it.id === selected, connecting: it.id === connectFrom, showRank: filter && filter.kind === "agenda" },
+  })), [frame, selected, connectFrom, offsets, filter]);
+
+  // Dragging a card moves it from its place in the layout; the offset is kept (per vault, in the browser)
+  // through later layouts until the positions are reset.
+  const onNodesChange = (changes) => {
+    const moved = changes.filter((c) => c.type === "position" && c.position);
+    if (!moved.length) return;
+    const base = new Map(frame.items.map((it) => [it.id, it]));
+    const next = { ...offsets };
+    for (const c of moved) {
+      const it = base.get(c.id);
+      if (it) next[c.id] = { dx: c.position.x - it.x, dy: c.position.y - it.y };
+    }
+    setOffsets(next);
+    latestOffsets.current = next;
+  };
+  const latestOffsets = useRef(offsets);
+  latestOffsets.current = offsets;
+  const saveOffsets = (next) => storage.set(G.vault, "offsets", next);
 
   const edges = useMemo(() => {
-    const colors = { supports: css("--supports"), opposes: css("--opposes") };
+    const colors = { supports: css("--supports"), opposes: css("--opposes"), "blocked-by": css("--blocked") };
     const opacity = new Map(frame.items.map((it) => [it.id, it.opacity]));
+    const at = new Map(frame.items.map((it) => [it.id, offsets[it.id] ? { ...it, x: it.x + offsets[it.id].dx, y: it.y + offsets[it.id].dy } : it]));
     return frame.edges.filter((e) => opacity.has(e.from) && opacity.has(e.to)).map(({ edge, from, to, cross, arrowAtEnd }) => {
       const color = colors[edge.rel] || css("--edge");
+      const [sourceHandle, targetHandle] = sides(at, from, to);
       return {
-        id: edge.id, type: "relation", source: from, target: to, label: G.schema.relations[edge.rel].label,
+        id: edge.id, type: "relation", source: from, target: to, sourceHandle, targetHandle, label: G.schema.relations[edge.rel].label,
         data: { forward: arrowAtEnd }, className: "rel-" + edge.rel + (cross ? " cross" : ""),
         style: { stroke: color, opacity: Math.min(opacity.get(from), opacity.get(to)) },
       };
     });
-  }, [frame]);
+  }, [frame, offsets]);
 
   // --- Changing the view ---
 
@@ -204,12 +254,14 @@ function App() {
 
   const action = async (kind, value, id = selected) => {
     if (kind === "connect") return setConnectFrom(selected);
-    if (kind === "priority" || kind === "tick" || kind === "answer") {
+    if (kind === "priority" || kind === "tick" || kind === "answer" || kind === "order") {
       try {
         if (kind === "tick") await api.tick(value);
+        else if (kind === "order") await api.order(value);
         else if (kind === "answer") await api.answer(value.id, value.text);
         else await api.setFields(id, { priority: value });
-        await changed({ message: kind === "tick" ? "Ticked: " + value : kind === "answer"
+        await changed({ message: kind === "order" ? (value.length ? "Order saved, in the notebook for the next session."
+                                                         : "Back to the default order.") : kind === "tick" ? "Ticked: " + value : kind === "answer"
           ? "Answered " + value.id + ", in the notebook for the next session." : "Priority set to " + value + "." });
       } catch (err) {
         setToast({ text: err.message, error: true });
@@ -245,6 +297,7 @@ function App() {
           if (matches) setFilterUnfolded(all); else setUnfolded(all);
         }}
         onFit=${() => flow.fitView({ padding: 0.12, duration: 250 })}
+        onResetPositions=${Object.keys(offsets).length ? () => { setOffsets({}); saveOffsets({}); } : null}
         onNewRoot=${() => setDialog({ kind: "root", project })}
         onOverview=${() => { setSelected(null); setFilter(null); }} />
       <${Breadcrumb} G=${G} path=${foc ? trail : null} onFocus=${focusOn}
@@ -253,7 +306,9 @@ function App() {
         <div className="graph">
           ${matches && !view.nodes.length ? html`<div className="empty muted">No notes match this filter.</div>` : null}
           <${ReactFlow} nodes=${nodes} edges=${edges} nodeTypes=${nodeTypes} edgeTypes=${edgeTypes}
-            nodesDraggable=${false} nodesConnectable=${false} elementsSelectable=${false}
+            nodesDraggable=${true} nodeDragThreshold=${4} onNodesChange=${onNodesChange}
+            onNodeDragStop=${() => saveOffsets(latestOffsets.current)} panOnDrag=${[0, 1]}
+            nodesConnectable=${false} elementsSelectable=${false}
             minZoom=${0.1} maxZoom=${2.5} proOptions=${{ hideAttribution: true }} zoomOnDoubleClick=${false}
             onNodeClick=${(e, node) => {
               if (connectFrom) {
@@ -269,7 +324,7 @@ function App() {
             <${MiniMap} pannable zoomable nodeColor=${(n) => n.data.color} nodeStrokeWidth=${0} />
           </${ReactFlow}>
         </div>
-        <${Panel} G=${G} id=${selected} matches=${matches} onReveal=${reveal} onFocus=${focusOn} onAction=${action} onUnlink=${unlink} />
+        <${Panel} G=${G} id=${selected} matches=${matches} byRank=${!!filter && filter.kind === "agenda"} onReveal=${reveal} onFocus=${focusOn} onAction=${action} onUnlink=${unlink} />
       </main>
       ${connectFrom ? html`
         <div className="banner">Click the note to connect “${G.byId.get(connectFrom).title}” to.

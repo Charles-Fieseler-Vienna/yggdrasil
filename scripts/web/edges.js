@@ -6,11 +6,15 @@ import { html } from "./html.js";
 
 const LABEL_AT = 0.4, ARROW_AT = 0.68, ARROW = 9;
 
-// A cubic curve leaving s rightwards and entering t from the left, as React Flow draws them.
-function curve(sx, sy, tx, ty) {
-  const dx = tx - sx;
-  const d = dx >= 0 ? 0.5 * dx : 0.25 * 25 * Math.sqrt(-dx);
-  const P = [[sx, sy], [sx + d, sy], [tx - d, ty], [tx, ty]];
+const OUT = { left: [-1, 0], right: [1, 0], top: [0, -1], bottom: [0, 1] };
+
+// A cubic curve leaving s by side sp and entering t by side tp: right to left as React Flow draws them,
+// bottom to top between neighbours in a column, and a loop out to the right between cards further apart.
+function curve(sx, sy, sp, tx, ty, tp) {
+  const dx = tx - sx, dy = Math.abs(ty - sy);
+  const d = sp === "right" && tp === "left" ? (dx >= 0 ? 0.5 * dx : 0.25 * 25 * Math.sqrt(-dx))
+          : sp === tp ? 40 + 0.15 * dy : 0.4 * dy;  // under half the gap, so the curve never doubles back
+  const P = [[sx, sy], [sx + d * OUT[sp][0], sy + d * OUT[sp][1]], [tx + d * OUT[tp][0], ty + d * OUT[tp][1]], [tx, ty]];
   const at = (t) => {
     const u = 1 - t, w = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t];
     return [0, 1].map((k) => w.reduce((a, wi, i) => a + wi * P[i][k], 0));
@@ -22,11 +26,13 @@ function curve(sx, sy, tx, ty) {
   return { path: `M${sx},${sy} C${P[1]} ${P[2]} ${tx},${ty}`, at, slope };
 }
 
-export function RelationEdge({ id, sourceX, sourceY, targetX, targetY, label, style, data }) {
-  const c = curve(sourceX, sourceY, targetX, targetY);
-  const [lx, ly] = c.at(LABEL_AT);
-  const [ax, ay] = c.at(ARROW_AT);
-  const [vx, vy] = c.slope(ARROW_AT);
+export function RelationEdge({ id, sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition, label, style, data }) {
+  const c = curve(sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition);
+  // between neighbours in a column the gap is short: the arrowhead mid-gap, the label beside it
+  const short = sourcePosition !== targetPosition && (sourcePosition === "top" || sourcePosition === "bottom");
+  const [ax, ay] = c.at(short ? 0.5 : ARROW_AT);
+  const [lx, ly] = short ? [ax + 12 + 3 * String(label).length, ay] : c.at(LABEL_AT);
+  const [vx, vy] = c.slope(short ? 0.5 : ARROW_AT);
   const angle = Math.atan2(vy, vx) * 180 / Math.PI + (data.forward ? 0 : 180);
   return html`
     <${BaseEdge} id=${id} path=${c.path} style=${style} label=${label} labelX=${lx} labelY=${ly}

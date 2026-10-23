@@ -27,6 +27,7 @@ export const api = {
   overview: () => call("GET", "overview"),
   tick: (text) => call("POST", "todos/tick", { text }),
   answer: (id, text) => call("POST", "asks/answer", { id, text }),
+  order: (ids) => call("POST", "agenda/order", { ids }),
 };
 
 // Calls onVersion(version) now and whenever the tree changes on disk; reconnects by itself.

@@ -5,6 +5,23 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
+## 0.5.16 (2026-10-23), tree format 2
+
+- The agent's list (what a session looks at first) is ordered, most important first, in the session
+  briefing, `ygg report` and the web app: answered by the user, in progress, high priority, named in the
+  last handoff. It was alphabetical, which left the choice to each session. A note blocked by an unfinished
+  note or a question for the user is listed after the rest, unnumbered, as not to start.
+- `ygg order NOTE...` puts notes first on that list, in a notebook entry (`--default` goes back); the web
+  app reorders the list by dragging (in the Overview, and in the side panel of its "What the agent sees
+  first" filter, which also numbers the cards).
+- Web app: cards can be dragged, and keep their place through later changes and reloads until **Reset
+  positions**; the middle button pans anywhere. Edges between cards in one column run top to bottom (or
+  loop on the right past the cards between), and `blocked-by` edges are easier to see.
+- Web app: edges no longer vanish after folding or unfolding (every other time, or always): React Flow
+  forgot the cards' handles whenever the animation handed it new node objects.
+- Web app: the page's files are revalidated on every load, so a browser no longer keeps running cached
+  modules of an older version after an update.
+
 ## 0.5.15 (2026-10-23), tree format 2
 
 - A note is frozen once it is committed as done, for the commands as for `ygg check`: one marked done since

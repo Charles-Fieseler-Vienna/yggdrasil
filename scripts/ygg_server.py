@@ -12,7 +12,7 @@ import sys
 import threading
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -62,7 +62,7 @@ def overview_json(ygg, vault):
         briefing = "\n".join(hook.summary(ygg, root, root))
     except Exception as e:  # the plugin's hook is not next to this copy of ygg
         briefing = "(could not build the briefing: %s)" % e
-    return {"agenda": [{"id": by_stem[s], "stem": s, "why": why} for s, why in sorted(ygg.agenda(vault).items())],
+    return {"agenda": [{"id": by_stem[s], "stem": s, "why": why} for s, why in ygg.agenda(vault).items()],
             "todos": [t for t in ygg.all_todos(root) if not t["done"]],
             "issues": issues,
             "asks": [ask(q) for q in ygg.all_asks(root) if not q["answer"]],
@@ -88,10 +88,12 @@ def graph_json(ygg, vault):
             asks.setdefault(stem, []).append({"id": q["id"], "question": q["question"], "blocks": stem in q["blocks"]})
     old = {d.stem for rel, s, d in vault.edges() if rel == "supersedes"}
     first = ygg.agenda(vault)
+    free = [stem for stem, why in first.items() if not ygg.is_blocked(why)]
+    rank = {stem: i + 1 for i, stem in enumerate(free)}  # blocked notes are listed after these, unnumbered
     nodes = [{"id": n.uid, "stem": n.stem, "title": n.content, "type": n.type, "status": n.status,
               "confidence": n.meta.get("confidence"), "outcome": n.meta.get("outcome"),
               "flag": flags.get(n.stem), "issues": issues.get(n.stem, []), "asks": asks.get(n.stem, []), "superseded": n.stem in old,
-              "agenda": first.get(n.stem, []),
+              "agenda": first.get(n.stem, []), "rank": rank.get(n.stem),
               "projects": [ygg.unlink_name(p) for p in n.meta.get("projects") or []],
               "file": n.path.relative_to(vault.root).as_posix(),
               "meta": {k: v for k, v in n.meta.items() if k not in HIDDEN_META}}
@@ -106,7 +108,9 @@ def graph_json(ygg, vault):
               "relations": {r: {"label": v[0], "complement": v[1], "pairs": v[3]} for r, v in ygg.RELATIONS.items()},
               "confidence": ygg.CONFIDENCE, "outcomes": ygg.OUTCOMES, "statuses": ["open", "in-progress"],
               "priorities": ygg.PRIORITIES}
+    by_stem = {n.stem: n.uid for n in vault.nodes.values()}
     return {"vault": vault.root.name, "version": tree_version(vault.root), "nodes": nodes, "edges": edges,
+            "agenda": [by_stem[s] for s in first if by_stem.get(s)], "agendaOrder": ygg.agenda_order(vault.root),
             "projects": projects, "schema": schema, "errors": vault.errors}
 
 
@@ -139,6 +143,10 @@ class NodeFields(BaseModel):
 
 class Done(BaseModel):
     outcome: Optional[str] = None
+
+
+class Order(BaseModel):
+    ids: List[str] = []  # notes to put first, in order; none: back to the default order
 
 
 class Tick(BaseModel):
@@ -185,6 +193,17 @@ class Tree:
         return "\n".join(parts)
 
 
+class Uncached(StaticFiles):
+    """The page's files, which the browser must check again on every load (a cheap 304 when unchanged):
+    without it, a browser keeps running cached modules of an older page after ygg is updated, a mix of old
+    and new that fails in odd ways."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 class TreeFilter(DefaultFilter):
     """Changes to notes, relations.json and the notebook; not .obsidian/ or editor temp files."""
 
@@ -228,6 +247,12 @@ def create_app(ygg, root, token):
     @api.post("/todos/tick")
     def tick_todo(q: Tick):
         return {"message": tree.run("tick", q.text)}
+
+    @api.post("/agenda/order")
+    def set_order(q: Order):
+        vault = tree.vault()
+        stems = [node(vault, uid).stem for uid in q.ids]
+        return {"message": tree.run("order", "--", *stems) if stems else tree.run("order", "--default")}
 
     @api.post("/asks/answer")
     def answer_ask(q: Answer):
@@ -304,9 +329,10 @@ def create_app(ygg, root, token):
 
     @app.get("/", response_class=HTMLResponse)
     def index():
-        return (WEB_DIR / "index.html").read_text(encoding="utf-8").replace("{{YGG_TOKEN}}", token)
+        return HTMLResponse((WEB_DIR / "index.html").read_text(encoding="utf-8").replace("{{YGG_TOKEN}}", token),
+                            headers={"Cache-Control": "no-store"})
 
-    app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
+    app.mount("/static", Uncached(directory=str(WEB_DIR)), name="static")
     return app
 
 

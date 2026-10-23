@@ -24,7 +24,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-__version__ = "0.5.15"  # the tool; keep .claude-plugin/plugin.json in step
+__version__ = "0.5.16"  # the tool; keep .claude-plugin/plugin.json in step
 # The tree format. Bump it when a tree written by this ygg could fail the checks of an older one, and
 # teach `ygg init` to upgrade older trees; ygg.json records each tree's format as spec_version.
 SPEC_VERSION = 2  # 2: notes in no project are allowed (a warning, not an error)
@@ -2134,6 +2134,10 @@ def cmd_report(a):
                                                           key=lambda n: str(n.meta.get("dateModified")))))
     cap = None if a.all else LIST_CAP
     print_asks(vault.root, cap)
+    first = [(s, why) for s, why in agenda(vault).items() if not a.project or project.stem in members.get(s, [])]
+    if first:
+        print("## What a session looks at first, in order (%d)" % len(first))
+        print("\n".join(agenda_lines(first, cap, " (`--all`)")) + "\n")
     for title, group in groups:
         if not group:
             continue
@@ -2593,7 +2597,82 @@ def agenda(vault):
         for stem in q["blocks"] if not q["answer"] else []:
             if stem in out and "waiting on the user" not in out[stem]:
                 out[stem].append("waiting on the user")
-    return dict(out)
+    for rel, s, d in vault.edges():
+        if rel == "blocked-by" and s.stem in out and d.status != "done":
+            out[s.stem].append("blocked by " + wikilink(d.stem))
+    placed = agenda_order(vault.root)
+    placed = {stem: i for i, stem in enumerate(placed["stems"] if placed else [])}
+    def rank(stem):
+        why = out[stem]
+        if stem in placed:
+            return (is_blocked(why), 0, placed[stem])
+        return (is_blocked(why), 1, min(AGENDA_RANK.get(w, len(AGENDA_RANK)) for w in why), stem)
+    return {stem: out[stem] for stem in sorted(out, key=rank)}
+
+
+def is_blocked(why):
+    """Whether a note on the agent's list waits on something (an unfinished note it is blocked by, or a
+    question for the user): it is listed after the rest, unnumbered, and not started."""
+    return any(w == "waiting on the user" or w.startswith("blocked by ") for w in why)
+
+
+def agenda_lines(first, cap=None, more=""):
+    """The agent's list as text: the notes that can be started, numbered, then the blocked ones."""
+    free = [(s, why) for s, why in first if not is_blocked(why)]
+    stuck = [(s, why) for s, why in first if is_blocked(why)]
+    lines = ["%d. %s: %s" % (i + 1, wikilink(s), ", ".join(why)) for i, (s, why) in enumerate(free[:cap])]
+    if cap and len(free) > cap:
+        lines.append("… and %d more%s" % (len(free) - cap, more))
+    if stuck:
+        lines.append("Blocked, not to start until what blocks them is done or answered:")
+        lines += ["- %s: %s" % (wikilink(s), ", ".join(why)) for s, why in stuck[:cap]]
+        if cap and len(stuck) > cap:
+            lines.append("- … and %d more%s" % (len(stuck) - cap, more))
+    return lines
+
+
+# The agenda's default order: what the user just answered, then work under way, then what is marked high,
+# then what the handoff names; a blocked note goes last. `ygg order` puts notes first instead.
+AGENDA_RANK = {"answered by the user": 0, "in progress": 1, "high priority": 2, "named in the last handoff": 3}
+ORDER_TAG = "agenda order"
+
+
+def agenda_order(root):
+    """{when, stems} from the latest `ygg order` entry, or None if there is none or it went back to the default."""
+    found = [e for e in notebook_entries(root) if e["tag"] == ORDER_TAG]
+    if not found:
+        return None
+    stems = [unlink_name(m.group(1).strip()) for m in re.finditer(r"^\d+\. \[\[([^\]]+)\]\]", found[-1]["text"], re.M)]
+    return {"when": found[-1]["when"], "stems": stems} if stems else None
+
+
+def cmd_order(a):
+    vault = open_vault(a)
+    if a.default:
+        if a.notes:
+            die("give notes to put first, or --default to go back to the default order, not both")
+        text = "The order of what a session looks at first is back to the default."
+    else:
+        if not a.notes:
+            die("name the notes to put first, in order (or --default to go back to the default order)")
+        stems = [vault.resolve(x).stem for x in a.notes]
+        dup = sorted({s for s in stems if stems.count(s) > 1})
+        if dup:
+            die("each note once: %s" % ", ".join(dup))
+        first = agenda(vault)
+        off = [s for s in stems if s not in first]
+        if off:
+            die("not on the list a session looks at first (`ygg report` shows it): %s. Put a note there by "
+                "setting it in progress or at high priority (`ygg set NOTE --priority high`)" % ", ".join(off))
+        stuck = [s for s in stems if is_blocked(first[s])]
+        if stuck:
+            die("blocked, so listed after the rest until what blocks it is done or answered: %s" % "; ".join(
+                "%s (%s)" % (s, ", ".join(w for w in first[s] if w == "waiting on the user" or w.startswith("blocked")))
+                for s in stuck))
+        text = ("What a session looks at first, in this order; the rest follow in the default order:\n\n"
+                + "\n".join("%d. %s" % (i + 1, wikilink(s)) for i, s in enumerate(stems)))
+    head = append_entry(vault.root, ORDER_TAG, text)
+    print("%s: %s" % (NOTEBOOK, head))
 
 
 # --- Web app -------------------------------------------------------------------
@@ -2730,6 +2809,11 @@ def main(argv=None):
     p.add_argument("id", help="the question's id")
     p.add_argument("--text", "-m", required=True, help="the answer, and why")
     p.set_defaults(func=cmd_answer)
+
+    p = sub.add_parser("order", help="put notes first on the list a session looks at first, in this order")
+    p.add_argument("notes", nargs="*", help="notes on that list, first first")
+    p.add_argument("--default", action="store_true", help="go back to the default order")
+    p.set_defaults(func=cmd_order)
 
     p = sub.add_parser("issues", help="list open issues and what rests on the notes they affect")
     p.add_argument("target", nargs="?", help="one issue id, listed in full")

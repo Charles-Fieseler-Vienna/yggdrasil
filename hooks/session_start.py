@@ -9,6 +9,7 @@ from pathlib import Path
 
 SKIP = {"node_modules", "venv", "__pycache__", "site-packages"}  # and hidden folders
 HANDOFF_CHARS = 2500
+AGENDA_CAP = 12
 
 
 def find_trees(cwd):
@@ -48,13 +49,14 @@ def summary(ygg, root, cwd):
     lines.append("- `%s`: %d notes in %d project%s (%s)." % (
         where, len(nodes), len(vault.projects), "" if len(vault.projects) == 1 else "s",
         ", ".join(sorted(vault.projects)) or "none"))
-    first = ygg.agenda(vault)
-    running = [s for s, why in sorted(first.items()) if "in progress" in why]
-    high = [s for s, why in sorted(first.items()) if "high priority" in why]
-    for title, group in (("In progress", running), ("High priority", high)):
-        if group:
-            lines.append("  %s: %s" % (title, "; ".join("[[%s]]" % s for s in group[:12])
-                                       + (" and %d more" % (len(group) - 12) if len(group) > 12 else "")))
+    first = list(ygg.agenda(vault).items())
+    if first:
+        placed = ygg.agenda_order(root)
+        mine = sum(1 for s, _ in first if s in placed["stems"]) if placed else 0
+        order = ("the first %d in the order the user set on %s, then " % (mine, placed["when"]) if mine else "") + (
+            "answered by the user, in progress, high priority, named in the last handoff; blocked ones last, unnumbered")
+        lines.append("  What to look at first, most important first (%s):" % order)
+        lines += ["  " + l for l in ygg.agenda_lines(first, AGENDA_CAP, " (`ygg report`)")]
     entries = ygg.notebook_entries(root)
     hand = [i for i, e in enumerate(entries) if "handoff" in e["tag"].lower()]
     if hand:

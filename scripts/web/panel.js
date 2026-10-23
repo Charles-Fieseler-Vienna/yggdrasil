@@ -42,6 +42,60 @@ function Ask({ q, link, onAction, here }) {
     </div>`;
 }
 
+// The agent's list, most important first, as the session briefing gives it: the notes that can be started,
+// numbered, then the blocked ones. Dragging a row (or ↑ ↓) reorders it; saving runs `ygg order` with the
+// numbered notes, a notebook entry that puts them first.
+const plain = (why) => why.replace(/\[\[|\]\]/g, "");
+
+export function Agenda({ G, link, onAction }) {
+  const base = G.agenda.filter((id) => G.byId.get(id).rank);
+  const stuck = G.agenda.filter((id) => !G.byId.get(id).rank);
+  const [draft, setDraft] = useState(null);  // {from: the order it was made from, ids}
+  const [dragged, setDragged] = useState(null);
+  const ids = draft && draft.from === base.join() ? draft.ids : base;
+  const changed = ids.join() !== base.join();
+  const move = (from, to) => {
+    if (to < 0 || to >= ids.length || from === to) return;
+    const next = ids.slice();
+    next.splice(to, 0, next.splice(from, 1)[0]);
+    setDraft({ from: base.join(), ids: next });
+  };
+  const order = G.agendaOrder;
+  const placed = order ? base.filter((id) => order.stems.includes(G.byId.get(id).stem)).length : 0;
+  const row = (id, i) => {
+    const n = G.byId.get(id);
+    return html`<li key=${id} className=${"agenda-item" + (i !== null && dragged === i ? " dragged" : "") + (i === null ? " blocked" : "")}
+        draggable=${i !== null} onDragStart=${(e) => { e.dataTransfer.effectAllowed = "move"; setDragged(i); }}
+        onDragEnd=${() => setDragged(null)}
+        onDragOver=${(e) => { if (i !== null && dragged !== null) { e.preventDefault(); if (dragged !== i) { move(dragged, i); setDragged(i); } } }}>
+      ${i !== null ? html`<span className="grip" title="Drag to reorder">⠿</span>` : null}
+      <span className="rank">${i === null ? "–" : i + 1 + "."}</span>
+      <div className="agenda-text"><div>${link(id, n.title)}</div>
+        <div className="muted">${n.agenda.map(plain).join(", ")}
+        ${n.status !== "done" ? html` · priority <select className="inline" value=${n.meta.priority || "normal"} title="priority"
+            onChange=${(e) => onAction("priority", e.target.value, id)}>
+          ${G.schema.priorities.map((v) => html`<option key=${v} value=${v}>${v}</option>`)}</select>` : null}</div></div>
+      ${i !== null ? html`<span className="moves">
+        <button title="Up" disabled=${i === 0} onClick=${() => move(i, i - 1)}>↑</button>
+        <button title="Down" disabled=${i === ids.length - 1} onClick=${() => move(i, i + 1)}>↓</button></span>` : null}
+    </li>`;
+  };
+  return html`
+    <p className="muted agenda-order">${placed
+      ? html`The first ${placed} in the order you set on ${order.when}; the rest in the default order. `
+      : "In the default order: answered by you, in progress, high priority, named in the last handoff. "}
+      ${ids.length > 1 ? "Drag ⠿ (or ↑ ↓) to reorder." : null}</p>
+    <ol className="match-list agenda">${ids.map((id, i) => row(id, i))}</ol>
+    ${changed || placed ? html`<div className="agenda-actions">${changed ? html`
+      <span className="muted">goes into the notebook</span>
+      <button onClick=${() => setDraft(null)}>Cancel</button>
+      <button className="primary" onClick=${() => { onAction("order", ids); setDraft(null); }}>Save order</button>` : html`
+      <button onClick=${() => onAction("order", [])} title="Drop your order">Default order</button>`}
+    </div>` : null}
+    ${stuck.length ? html`<p className="muted agenda-order">Blocked: not started until what blocks them is done or answered.</p>
+      <ol className="match-list agenda">${stuck.map((id) => row(id, null))}</ol>` : null}`;
+}
+
 // With nothing selected and no filter: where the work stands, as the agent is told it (the same lists the
 // SessionStart briefing and `ygg report` give), and the briefing itself.
 function Overview({ G, onReveal, onAction }) {
@@ -66,15 +120,9 @@ function Overview({ G, onReveal, onAction }) {
         <ul className="entries">${o.answered.map((q) => html`<li key=${q.id}><b>${q.question}</b><br />
           <span className="muted">${q.answered || ""}</span> ${q.answer}</li>`)}</ul>
         <p className="muted">The next session is told these, and acts on them.</p>`) : null}
-      ${section("What the agent sees first", o.agenda.length, o.agenda.length ? html`
-        <ul className="match-list">${o.agenda.map((a) => {
-          const n = G.byId.get(a.id);
-          return html`<li key=${a.id} className="agenda-item"><div>${link(a.id, n ? n.title : a.stem)}</div>
-            <div className="muted">${a.why.join(", ")}
-            ${n && n.status !== "done" ? html` · priority <select className="inline" value=${n.meta.priority || "normal"} title="priority"
-                onChange=${(e) => onAction("priority", e.target.value, a.id)}>
-              ${G.schema.priorities.map((v) => html`<option key=${v} value=${v}>${v}</option>`)}</select>` : null}</div></li>`;
-        })}</ul>` : html`<p className="muted">Nothing in progress, at high priority or named in the last handoff.
+      ${section("What the agent sees first", G.agenda.length, G.agenda.length
+        ? html`<${Agenda} G=${G} link=${link} onAction=${onAction} />`
+        : html`<p className="muted">Nothing in progress, at high priority or named in the last handoff.
           Set a note's priority to high to put it here.</p>`)}
       ${o.todos.length ? section("To do, from the notebook", o.todos.length, html`
         <ul className="todos">${o.todos.slice().reverse().map((t) => html`
@@ -126,7 +174,7 @@ function MatchList({ G, matches, onReveal }) {
     </aside>`;
 }
 
-export function Panel({ G, id, matches, onReveal, onFocus, onAction, onUnlink }) {
+export function Panel({ G, id, matches, byRank, onReveal, onFocus, onAction, onUnlink }) {
   const n = id && G.byId.get(id);
   const [body, setBody] = useState({ id: null, html: "" });
   useEffect(() => {
@@ -137,6 +185,9 @@ export function Panel({ G, id, matches, onReveal, onFocus, onAction, onUnlink })
     return () => { live = false; };
   }, [id, G.version]);
 
+  if (!n && matches && byRank) return html`
+    <aside className="panel overview"><h3>What the agent sees first (${G.agenda.length})</h3>
+      <${Agenda} G=${G} link=${(id, title) => html`<a onClick=${() => onReveal(id)}>${title}</a>`} onAction=${onAction} /></aside>`;
   if (!n && matches) return html`<${MatchList} G=${G} matches=${matches} onReveal=${onReveal} />`;
   if (!n) return html`<${Overview} G=${G} onReveal=${onReveal} onAction=${onAction} />`;
   const spec = G.schema.types[n.type];

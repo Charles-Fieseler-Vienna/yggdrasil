@@ -53,6 +53,19 @@ def test_session_start_flags_a_decision_left_in_prose(tmp_path):
     assert "leaves a decision" not in hook("session_start.py", {"cwd": str(root)})
 
 
+def test_session_start_lists_the_agenda_in_order(tmp_path):
+    root = make_repo(tmp_path / "proj")
+    run("--vault", root, "new", "question", "Alpha", "--priority", "high")
+    run("--vault", root, "new", "question", "Beta", "--status", "in-progress")
+    out = hook("session_start.py", {"cwd": str(root)})
+    assert "What to look at first, most important first (answered by the user, in progress" in out
+    assert out.index("1. [[QUE - Beta]]: in progress") < out.index("2. [[QUE - Alpha]]: high priority")
+    run("--vault", root, "order", "Alpha")
+    out = hook("session_start.py", {"cwd": str(root)})
+    assert "(the first 1 in the order the user set on" in out
+    assert out.index("1. [[QUE - Alpha]]") < out.index("2. [[QUE - Beta]]")
+
+
 def test_session_start_reports_format(tmp_path):
     root = make_repo(tmp_path / "proj")
     (root / "ygg.json").write_text(json.dumps({"spec_version": 0}))

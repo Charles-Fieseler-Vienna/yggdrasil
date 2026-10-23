@@ -15,6 +15,7 @@
   --edge: #8a9099;
   --supports: #2e8b3e;
   --opposes: #d32f2f;
+  --blocked: #d84315;
   --tint: 20%;
   color-scheme: light;
 }
@@ -30,6 +31,7 @@
     --edge: #7b828b;
     --supports: #5cbf6b;
     --opposes: #ef5350;
+    --blocked: #ff7043;
     --tint: 32%;
     color-scheme: dark;
   }
@@ -136,7 +138,22 @@ main { flex: 1; display: flex; min-height: 0; }
   text-overflow: ellipsis; }
 .panel select.inline { font: inherit; padding: 0 2px; }
 .overview-part { margin-bottom: 14px; }
-.overview li.agenda-item { display: block; }
+.overview li.agenda-item { display: flex; gap: 6px; align-items: baseline; }
+.overview li.agenda-item .rank { color: var(--muted); font-size: 12px; min-width: 1.6em; text-align: right; }
+.overview li.agenda-item .agenda-text { flex: 1; }
+.overview li.agenda-item .moves { display: flex; gap: 2px; visibility: hidden; }
+.overview li.agenda-item:hover .moves { visibility: visible; }
+.overview li.agenda-item .moves button { padding: 0 6px; font-size: 12px; }
+.overview li.agenda-item .grip { cursor: grab; color: var(--muted); user-select: none; }
+.overview li.agenda-item .grip:hover { color: var(--fg); }
+.overview li.agenda-item.blocked .rank { min-width: 2.6em; }
+.overview ol.agenda li.dragged { opacity: .45; }
+.overview .agenda-order { font-size: 12px; margin: 0 0 4px; }
+.overview .agenda-actions { display: flex; justify-content: flex-end; gap: 8px; align-items: center; margin-top: 6px; }
+.overview .agenda-actions:empty { display: none; }
+.rank-badge { display: inline-block; min-width: 18px; height: 18px; line-height: 18px; border-radius: 9px; padding: 0 3px;
+              box-sizing: border-box; text-align: center; font-size: 11px; font-weight: 700; color: var(--bg); background: var(--fg); }
+.note .rank-badge { position: absolute; bottom: -8px; left: -8px; }
 .overview li.agenda-item .muted { font-size: 12px; }
 .overview ul.todos { list-style: none; padding-left: 0; }
 .overview ul.todos li, .overview ul.entries li { margin: 4px 0; }
@@ -163,7 +180,8 @@ main { flex: 1; display: flex; min-height: 0; }
               --xy-controls-button-border-color: var(--line); }
 .react-flow__node { cursor: pointer; }
 .react-flow__edge-path { stroke-width: 1.5; }
-.react-flow__edge.cross .react-flow__edge-path { stroke-dasharray: 5 4; }
+.react-flow__edge.cross .react-flow__edge-path { stroke-dasharray: 7 4; stroke-width: 2.2; }
+.react-flow__edge.rel-blocked-by .react-flow__edge-text { fill: var(--blocked); font-weight: 600; }
 .react-flow__edge-text { font-size: 10.5px; fill: var(--muted); }
 .react-flow__edge.rel-supports .react-flow__edge-text { fill: var(--supports); }
 .react-flow__edge.rel-opposes .react-flow__edge-text { fill: var(--opposes); }

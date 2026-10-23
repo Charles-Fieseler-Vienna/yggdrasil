@@ -690,9 +690,43 @@ def test_agenda_is_what_a_session_is_pointed_at(populated, ygg):
     code, out = ygg("set", "Head bending is continuously driven", "--priority", "none", ok=False)
     assert code and "its priority no longer matters" in out and "supersedes" not in out
     _, out = ygg("report")
-    work = out.split("## Superseded, not done")[0]
+    work = re.sub(r"## What a session looks at first.*?\n\n", "", out, flags=re.S).split("## Superseded, not done")[0]
     assert "[[QUE - Next question]]" not in work and "[[QUE - Next question, sharper]]" in work
     assert "[[QUE - Next question]] (open)" in out.split("## Superseded, not done (1)")[1]
+
+
+def test_agenda_has_an_order_the_user_can_change(populated, ygg):
+    ygg("new", "question", "Alpha", "--link", "follows-from:Head bending", "--priority", "high")
+    ygg("new", "question", "Beta", "--link", "follows-from:Head bending", "--status", "in-progress")
+    ygg("new", "question", "Gamma", "--link", "follows-from:Head bending")
+    ygg("log", "Next: [[QUE - Gamma]].", "--handoff")
+    y = load_module()
+    order = lambda: list(y.agenda(y.Vault(populated)))
+    # by default: in progress, then high priority, then named in the handoff
+    assert order() == ["QUE - Beta", "QUE - Alpha", "QUE - Gamma"]
+    ygg("order", "Gamma", "Alpha")
+    assert order() == ["QUE - Gamma", "QUE - Alpha", "QUE - Beta"]
+    assert y.agenda_order(populated)["stems"] == ["QUE - Gamma", "QUE - Alpha"]
+    _, out = ygg("report")
+    assert "## What a session looks at first, in order (3)\n1. [[QUE - Gamma]]: named in the last handoff\n" in out
+    code, out = ygg("order", "Head bending", ok=False)
+    assert code and "not on the list" in out and "--priority high" in out
+    code, out = ygg("order", "Gamma", "Gamma", ok=False)
+    assert code and "each note once" in out
+    ygg("order", "--default")
+    assert order() == ["QUE - Beta", "QUE - Alpha", "QUE - Gamma"] and y.agenda_order(populated) is None
+    # a blocked note goes last, unnumbered, and cannot be ordered until unblocked
+    ygg("new", "question", "Delta", "--link", "follows-from:Head bending", "--priority", "high")
+    ygg("link", "Delta", "blocked-by", "Beta")
+    assert order()[-1] == "QUE - Delta"
+    assert y.agenda(y.Vault(populated))["QUE - Delta"] == ["high priority", "blocked by [[QUE - Beta]]"]
+    _, out = ygg("report")
+    assert ("3. [[QUE - Gamma]]: named in the last handoff\nBlocked, not to start until what blocks them is done or "
+            "answered:\n- [[QUE - Delta]]: high priority, blocked by [[QUE - Beta]]\n") in out
+    code, out = ygg("order", "Delta", "Alpha", ok=False)
+    assert code and "blocked" in out and "QUE - Delta (blocked by [[QUE - Beta]])" in out
+    ygg("unlink", "Delta", "blocked-by", "Beta")
+    assert "QUE - Delta" in order()[:3]
 
 
 def test_watch_flags_nan_losses_not_every_nan():
