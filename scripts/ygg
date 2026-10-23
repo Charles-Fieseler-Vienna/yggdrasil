@@ -24,7 +24,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-__version__ = "0.5.12"  # the tool; keep .claude-plugin/plugin.json in step
+__version__ = "0.5.13"  # the tool; keep .claude-plugin/plugin.json in step
 # The tree format. Bump it when a tree written by this ygg could fail the checks of an older one, and
 # teach `ygg init` to upgrade older trees; ygg.json records each tree's format as spec_version.
 SPEC_VERSION = 2  # 2: notes in no project are allowed (a warning, not an error)
@@ -1555,7 +1555,9 @@ def cmd_log(a):
         text += "\n\n" + run_line(rid, a.pid, a.job, logs, note)
         tag = tag or "run"
     elif a.log:
-        die("--log describes a run; give its --pid (or --job) too")
+        die("--log describes a running process; give its --pid (or --job) too. A run that already ended in the "
+            "foreground needs neither: name its output in the entry (`ygg log \"what it found; output in PATH\" "
+            "--tag run`)")
     elif a.note:  # an entry about a note (a decision, a dead end) rather than a run for it
         stem = vault.resolve(a.note).stem
         if wikilink(stem) not in text:

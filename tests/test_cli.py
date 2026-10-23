@@ -196,7 +196,7 @@ def test_log_for_a_note_without_a_run(populated, ygg):
     ygg("log", "about [[CLM - Head bending is continuously driven]]", "--for", "CLM - Head bending is continuously driven")
     assert (populated / "NOTEBOOK.md").read_text().rstrip().endswith("about [[CLM - Head bending is continuously driven]]")
     _, out = ygg("log", "fit", "--log", "fit.log", ok=False)
-    assert "--log describes a run" in out
+    assert "--log describes a running process" in out and "already ended in the foreground" in out
     _, out = ygg("log", "picked it", "--tag", "decision", "--on", "Head bending", ok=False)
     assert "use --for NOTE" in out
 
