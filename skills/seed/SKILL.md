@@ -25,10 +25,12 @@ self-contained vault; each copy records its `origin` (`repository@commit:nodeIns
 
 ```bash
 cd PROJECT/research/tree
-ygg seed "QUE - ..." --from ~/Current_work/repos/Yggdrasil-charlie --dry-run   # show the user
-ygg seed "QUE - ..." --from ~/Current_work/repos/Yggdrasil-charlie
+ygg seed "QUE - ..." --dry-run   # show the user
+ygg seed "QUE - ..."
 ```
 
+`ygg seed` copies from the user's main tree (`ygg main` prints it); if none is set, ask the user which
+tree it is and set it with `ygg main PATH`, or pass `--from TREE` to seed from another tree.
 The main tree must be committed (the copies cite its commit). Seeding again later reuses what is already
 here (and any paper Source with the same Zotero key or DOI), so it can pull in new main-tree notes. Links in
 copied bodies to notes that were not copied become plain text. `ygg seed` appends a `seed` entry to the

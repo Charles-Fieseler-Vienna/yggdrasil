@@ -1,3 +1,4 @@
+import datetime
 import json
 import os
 import re
@@ -492,6 +493,48 @@ def test_compress_maps_seeds_into_a_clone_in_another_folder(populated, project, 
     assert "(seeded)" in out and "# Seeded from this tree" in out
 
 
+def test_main_tree_is_set_once_and_used_by_seed_and_compress(populated, project, tmp_path):
+    _, out = run("main", ok=False)
+    assert "no main tree is set" in out and "ygg main PATH" in out
+    _, out = seed(project, "Is the head wave", ok=False)
+    assert "no main tree is set" in out and "--from TREE" in out
+    _, out = run("main", tmp_path, ok=False)
+    assert "not a ygg tree" in out and "--main" in out
+    _, out = run("main", populated)
+    assert "main tree: %s" % populated.resolve() in out
+    assert run("main")[1].strip() == str(populated.resolve())
+    _, out = seed(project, "Is the head wave", "--dry-run")
+    assert out.count("- copy") == 4
+    _, out = run("--vault", populated, "seed", "Is the head wave", ok=False)
+    assert "is this tree" in out
+    commit(project.parent.parent, "seeded")
+    run("compress", project, cwd=project)  # from the project's tree, recorded in the main tree
+    assert (populated / "tree" / "@proj research tree.md").exists()
+    assert not (project / "tree" / "@proj research tree.md").exists()
+    _, out = run("compress", populated, cwd=project, ok=False)
+    assert "is the tree to compress into" in out
+    run("init", tmp_path / "main2", "--main")
+    assert run("main")[1].strip() == str((tmp_path / "main2").resolve())
+
+
+def test_a_moved_or_garbled_main_tree_is_refused(populated, project, tmp_path):
+    commit(project.parent.parent, "work")
+    run("main", populated)
+    moved = populated.with_name("moved")
+    populated.rename(moved)
+    for args in (("main",), ("compress", project), ("--vault", project, "seed", "Is the head wave")):
+        _, out = run(*args, cwd=project, ok=False)
+        assert "is not a ygg tree (moved?)" in out and "ygg main PATH" in out, args
+    assert not populated.exists()  # compress wrote nothing where the main tree used to be
+    config = tmp_path / "config" / "ygg" / "config.json"
+    for garbled in ("[]", '"%s"' % moved, '{"main_tree": 3}'):
+        config.write_text(garbled)
+        _, out = run("main", ok=False)
+        assert "no main tree is set" in out, garbled
+    run("main", moved)
+    assert run("main")[1].strip() == str(moved.resolve())
+
+
 def test_compress_refuses_uncommitted(populated, project):
     run("--vault", project, "new", "question", "Dirty")
     _, out = run("--vault", populated, "compress", project, ok=False)
@@ -816,3 +859,88 @@ def test_questions_for_the_user_wait_until_answered(populated, ygg):
 def load_module():
     from importlib.machinery import SourceFileLoader
     return SourceFileLoader("ygg_asks", str(ROOT / "scripts" / "ygg")).load_module()
+
+
+def backdate_notes(root, stamp="2020-01-01T09:00:00+00:00", relations=True):
+    """Notes (and relations) last changed long ago, so findings logged now are newer than any change to them."""
+    for p in list((root / "tree").glob("*.md")) + list((root / "ideas").glob("*.md")):
+        p.write_text(re.sub(r"(?m)^dateModified: .*$", "dateModified: " + stamp, p.read_text()))
+    if relations:
+        p = root / "relations.json"
+        p.write_text(re.sub(r'"created": \d+', '"created": 1577869200000', p.read_text()))
+
+
+def test_findings_piling_up_in_the_notebook_are_flagged(populated, ygg):
+    ygg("log", "where things stand", "--handoff")
+    backdate_notes(populated)
+    for i in range(7):
+        _, out = ygg("log", "finding %d" % i, "--tag", "surprise")
+        assert "distil" not in out
+    ygg("log", "a run", "--pid", "1", "--log", "fit.log")  # runs, to-dos and orders are not findings
+    ygg("log", "--todo", "check it")
+    _, report = ygg("report")
+    assert "notebook entries" not in report
+    _, out = ygg("log", "finding 7", "--tag", "result")
+    assert "8 notebook entries (decisions, results, surprises)" in out and "--issue --affects NOTE" in out
+    _, report = ygg("report")
+    assert "## Needs action" in report and "8 notebook entries" in report
+    _, out = ygg("log", "finding 8", "--tag", "decision")
+    assert "distil" not in out  # said again at the sixteenth, not at every entry
+    # steering is not recording: a priority or status change leaves the reminder
+    ygg("new", "question", "Where does it start", "--link", "follows-from:Head bending")
+    backdate_notes(populated)
+    ygg("set", "Where does it start", "--priority", "high", "--status", "in-progress")
+    _, report = ygg("report")
+    assert "notebook entries (decisions" in report
+    # a relation added counts as recording what came before it
+    ygg("link", "Where does it start", "blocked-by", "Head bending")
+    _, report = ygg("report")
+    assert "notebook entries (decisions" not in report
+    # and so does a change to a note, made at any time zone's clock
+    backdate_notes(populated)
+    _, report = ygg("report")
+    assert "notebook entries (decisions" in report
+    later = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=2)
+    backdate_notes(populated, later.replace(microsecond=0).isoformat(), relations=False)  # in UTC, after every entry
+    _, report = ygg("report")
+    assert "notebook entries (decisions" not in report
+
+
+def test_session_start_says_to_distil_piling_findings(populated, ygg):
+    from test_hooks import hook
+    backdate_notes(populated)
+    out = hook("session_start.py", {"cwd": str(populated)})
+    assert "The notebook is the raw record" in out and "notebook entries (decisions" not in out
+    for i in range(8):
+        ygg("log", "finding %d" % i)
+    assert "8 notebook entries (decisions, results, surprises)" in hook("session_start.py", {"cwd": str(populated)})
+
+
+def test_order_appends_and_the_latest_is_in_force(populated, ygg):
+    for t in ("Alpha", "Beta", "Gamma"):
+        ygg("new", "question", t, "--link", "follows-from:Head bending", "--priority", "high")
+    y = load_module()
+    orders = lambda: [e for e in y.notebook_entries(populated) if e["tag"] == "agenda order"]
+    ygg("order", "Gamma")
+    ygg("log", "something else")
+    ygg("order", "Beta", "Gamma")  # never edits the notebook: the earlier order and the entry after it stay
+    assert len(orders()) == 2 and "something else" in (populated / "NOTEBOOK.md").read_text()
+    assert y.agenda_order(populated)["stems"] == ["QUE - Beta", "QUE - Gamma"]
+    _, out = ygg("order", "Beta", "Gamma")  # the order in force: nothing written
+    assert "unchanged" in out and len(orders()) == 2
+    ygg("order", "Gamma")  # back to an earlier order: a new entry
+    assert len(orders()) == 3 and y.agenda_order(populated)["stems"] == ["QUE - Gamma"]
+    ygg("order", "--default")
+    assert y.agenda_order(populated) is None and len(orders()) == 4
+    ygg("check")
+
+
+def test_a_whole_name_in_other_capitals_is_not_ambiguous(populated, ygg):
+    ygg("new", "question", "Head", "--link", "follows-from:Head bending")
+    y = load_module()
+    vault = y.Vault(populated)
+    # "head" is part of three filenames, but the whole content of one of them
+    assert vault.resolve("head").stem == vault.resolve("que - HEAD").stem == "QUE - Head"
+    code, out = ygg("show", "hea", ok=False)
+    assert code and "matches several notes" in out
+    _, out = ygg("set", "Test-Project", "--add-root", "QUE - Head")

@@ -7,7 +7,7 @@ description: How to read and change a ygg research tree (a discourse graph of Qu
 
 A ygg tree is a folder with `ygg.json`: nodes in `tree/`, typed relations in `relations.json`, one note per
 project in `ideas/`, and a lab notebook, `NOTEBOOK.md`. A **project tree** lives in its project's repository
-at full detail; the user's **main tree** (Yggdrasil-charlie) holds only compressed nodes, the generalizable
+at full detail; the user's **main tree** (`ygg main` prints where it is) holds only compressed nodes, the generalizable
 results and dead ends of each project. The full specification is `${CLAUDE_PLUGIN_ROOT}/DESIGN.md`.
 
 ## The one rule
@@ -44,7 +44,7 @@ any unique part of the filename, or for papers `zotero:KEY` / `doi:DOI`. Titles 
 ```bash
 ygg new question "Is the head wave driven at the head" --body - --link "follows-from:QUE - Parent question"
 ygg new evidence "Head innovations travel down the body" --body - \
-  --link "derived-from:@Cosyne_2027 research tree" --link "derived-from:DATA - 36-animal cohort" \
+  --link "derived-from:@my-project research tree" --link "derived-from:DATA - 36-animal cohort" \
   --link "informs:Is the head wave driven" --confidence medium
 ygg done "Head innovations travel" --outcome succeeded
 ygg new claim "Head bending is continuously driven" --body - \
@@ -74,7 +74,7 @@ inline `python - <<EOF`; quick looks at data can stay inline. `ygg runs` lists r
 returns when they end, with the last lines of each log, reporting failures on the way. Wait with it rather than a loop of your own, and stop
 any background wait you started before you finish (a leftover one keeps a headless session from ending).
 
-**Starting a project from the main tree.** `ygg seed NOTE --from MAIN_TREE` in the project's tree copies a
+**Starting a project from the main tree.** `ygg seed NOTE` in the project's tree copies a
 main-tree question (or claim) and everything under it, each copy recording its `origin`, and makes it a root;
 the `ygg:seed` skill also expands it into concrete sub-questions and planned runs.
 
@@ -93,8 +93,19 @@ without text the entry is only the to-dos). Tick one when done with `ygg tick TE
 it); `ygg report` lists the open ones. Never edit past entries otherwise. A next step that is an experiment
 is a planned Evidence note, not a to-do.
 
+**Keeping the tree current.** The notebook is the raw record; the notes are what the next session, the web
+app and compression read. When a result settles something (a planned Evidence gets its answer, a Claim's
+confidence should move, a decision held), put it in the notes in the same session, not only in an entry:
+fill in and finish the Evidence, revise open Claims in place, add the Question it raises. Don't wait for a
+handoff the user may not ask for; a long session may never get one, and a compaction loses the details.
+`ygg log` says when findings are piling up unrecorded (eight entries newer than any change to the notes),
+and so do the report and the session briefing.
+
 **A problem in something results rest on** (a bug in code, bad recordings, a wrong preprocessing step): log
 it at once as an issue, naming the notes it touches: `ygg log "what is wrong" --issue --affects "DATA - ..."`.
+That includes a bug found in the code behind a recorded result: when an evaluation bug explains an
+Evidence's numbers, the issue affects that Evidence, even if the tree has no node for the code; a `surprise`
+entry alone leaves the old conclusion standing in the tree.
 Don't invalidate everything below it. `ygg issues ID` lists every note resting on it; judge each with the
 user: if the problem could change it, rerun and supersede it (a fixed Dataset supersedes the old one); if
 not, write a notebook line naming the issue id and the note with the reason

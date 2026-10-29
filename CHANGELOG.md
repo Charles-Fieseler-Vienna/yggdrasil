@@ -5,6 +5,33 @@ semantic versioning for the CLI, web app, skills and hooks. The **tree format** 
 tree's `ygg.json`) changes only when a tree written by a new ygg could fail the checks of an older one;
 `ygg init` upgrades a tree to the current format, and every command warns about a tree in another format.
 
+## 0.5.18 (2026-10-29), tree format 2
+
+- The main tree is a setting, not a path written into the skills: `ygg main PATH` (or `ygg init PATH --main`)
+  sets it once per machine, in `~/.config/ygg/config.json` (`$YGG_MAIN_TREE` overrides it), and `ygg main`
+  prints it. `ygg seed` copies from it unless given `--from`, and `ygg compress` records into it from
+  wherever it is run. The session briefing says where it is, or, if none is set, to ask the user.
+  Run `ygg main PATH` once after updating.
+- The skills, the README and `DESIGN.md` no longer name the author's own trees and projects.
+- The reminder to distil findings is no longer silenced by steering: a change to a note's status, priority,
+  schedule or scope alone leaves its `dateModified`. A relation added now counts as recording, and note and
+  notebook times are compared across time zones, so a note changed in a UTC cluster session counts when it
+  happened.
+
+## 0.5.17 (2026-10-26), tree format 2
+
+- Findings that pile up in the notebook without reaching the notes are flagged: from eight entries since
+  the last handoff (decisions, results, surprises; not runs, to-dos or bookkeeping) newer than any change to
+  a note, the session briefing, `ygg report` (Needs action) and the web app's Overview say to distil them,
+  and `ygg log` says so at every eighth. A three-day session in barlow_track logged 50 entries and changed
+  no note, leaving the tree's conclusions and agenda as they were before it.
+- The session briefing and the `ygg:tree` and `ygg:handoff` skills say to put findings that settle or
+  overturn notes into them during the session, and to log an issue on an Evidence whose numbers a bug
+  explains, rather than only a `surprise` entry.
+- `ygg order` (and the web app's reordering) writes nothing when the order is already in force.
+- A note or project named by its whole name in other capitals resolves to it (`ygg set BarlowTrack` named
+  a dozen notes containing "BarlowTrack" before reaching the project `barlowtrack`).
+
 ## 0.5.16 (2026-10-23), tree format 2
 
 - The agent's list (what a session looks at first) is ordered, most important first, in the session

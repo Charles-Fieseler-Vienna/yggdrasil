@@ -65,4 +65,6 @@ project's tree (the folder with `ygg.json`, e.g. `research/tree`), or pass `--va
 
 Keep the notebook as the `ygg:tree` skill says (decisions, dead ends, runs with their PIDs, to-dos, issues,
 questions for the user), as things happen. Never edit or reorder past entries, except ticking a to-do with
-`ygg tick`; correct one with a new entry.
+`ygg tick`; correct one with a new entry. Step 2 above is not only for the end: when results settle in a
+long session (one that runs for days, or is compacted), distil them as they come, and when `ygg log`, the
+report or the session briefing says findings are piling up unrecorded.

@@ -29,9 +29,9 @@ changes to skills, hooks and the CLI apply in the next session started anywhere.
 
 ## Ground rules
 
-- **Test on scratch trees, never on a real one.** The user's main tree is `~/Current_work/repos/Yggdrasil-charlie`;
-  project trees live in their projects (e.g. `Cosyne_2027/research/tree`). Clone one into a scratch folder
-  (`git clone ~/Current_work/repos/Yggdrasil-charlie $S/tree`) and run `bin/ygg --vault $S/tree ...`, or
+- **Test on scratch trees, never on a real one.** The user's main tree is the one `ygg main` prints;
+  project trees live in their projects (e.g. `my-project/research/tree`). Clone one into a scratch folder
+  (`git clone "$(ygg main)" $S/tree`) and run `bin/ygg --vault $S/tree ...`, or
   `ygg init` a fresh one. Scratch clones are yours to break; the rule that trees change only through `ygg`
   holds for real ones.
 - **Processes**: kill only those you started. `ygg serve` never returns; the user may have their own on 8765.
@@ -43,7 +43,7 @@ changes to skills, hooks and the CLI apply in the next session started anywhere.
 uv run --no-project --with pytest pytest tests          # the CLI and hooks, against throwaway trees (~1 min)
 YGG_WEB_TESTS=1 uv run --no-project --with pytest --with playwright pytest tests/test_web.py   # Chrome
 claude plugin validate .                                 # after changing the plugin (the CLAUDE.md warning is expected)
-python3 scripts/ygg --vault ~/Current_work/repos/Yggdrasil-charlie check   # before committing a change that could affect trees
+python3 scripts/ygg --vault "$(ygg main)" check        # before committing a change that could affect trees
 ```
 
 - Add a test with every change to the CLI or hooks. `tests/conftest.py` has the fixtures: `tree` (a fresh
@@ -109,9 +109,9 @@ The behaviour is specified in `DESIGN.md` (Web app). The implementation:
 ### Working on it
 
 1. Make a scratch tree worth looking at: a clone of the main tree, or a copy of a real project tree
-   committed in a scratch repository (the Cosyne tree, ~85 notes; the BarlowTrack tree, ~95):
+   committed in a scratch repository (one of 80 to 100 notes shows most of the layout's problems):
    ```bash
-   mkdir -p $S/web && cp -r ~/Current_work/repos/barlow_track/research/tree $S/web/
+   mkdir -p $S/web && cp -r PROJECT/research/tree $S/web/
    cd $S/web && git init -q && git add -A && git -c user.name=t -c user.email=t@t commit -qm scratch
    ```
 2. Serve it in the background on a spare port and keep the PID:
@@ -128,7 +128,7 @@ The behaviour is specified in `DESIGN.md` (Web app). The implementation:
 ## Trial rounds
 
 The skills and hooks are tested by headless sessions doing real work in a project tree, then reading what
-went wrong. A round, on a branch of a project repository made for it (e.g. `ygg-trial` in Cosyne_2027):
+went wrong. A round, on a branch of a project repository made for it (e.g. `ygg-trial`):
 
 ```bash
 claude -p "Continuing the <project> work on the <branch> branch. Catch up, then work through the next steps

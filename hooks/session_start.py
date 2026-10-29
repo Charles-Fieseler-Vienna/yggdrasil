@@ -96,6 +96,9 @@ def summary(ygg, root, cwd):
     if line:
         lines.append("  " + line)
     lines += ["  " + x for x in ygg.needs_action(vault, found)]
+    distil = ygg.distil_reminder(vault)
+    if distil:
+        lines.append("  " + distil)
     return lines
 
 
@@ -114,10 +117,25 @@ def main():
            "and relations only with the `ygg` command, never by editing tree/, relations.json or ygg.json. "
            "Keep the tree's lab notebook: append decisions, dead ends and surprises as they happen with "
            "`ygg log \"...\" --tag decision` (or dead-end, idea), and log every run you launch with "
-           "`ygg log ... --pid N --log PATH`. When the user wraps up, offer the ygg:handoff skill. When they "
+           "`ygg log ... --pid N --log PATH`. The notebook is the raw record, not the result: when a finding "
+           "settles or overturns something the notes say, put it in the notes during the session (load ygg:tree "
+           "first), and when it shows a recorded result was wrong, log an issue on that note (`ygg log \"...\" "
+           "--issue --affects NOTE`). When the user wraps up, offer the ygg:handoff skill. When they "
            "step back to think about what to pursue, use ygg:brainstorm; ygg:seed starts a project's tree "
            "from questions in another tree, and ygg:compress brings a project's results back. For papers "
            "use ygg:paper or ygg:digest.", ""]
+    main_root = ygg.main_tree()
+    if main_root in trees:
+        out.append("`%s` is the user's main tree: projects are seeded from it and compressed back into it."
+                   % os.path.relpath(main_root, cwd))
+    elif main_root and not (main_root / "ygg.json").exists():
+        out.append("The user's main tree is set to `%s`, which is not a ygg tree any more. Before seeding or "
+                   "compressing, ask the user where it is now and set it with `ygg main PATH`." % main_root)
+    elif main_root:
+        out.append("The user's main tree, which projects are seeded from and compressed into, is `%s`." % main_root)
+    else:
+        out.append("No main tree is set. Before seeding or compressing, ask the user which tree is their main "
+                   "tree (or whether to make one) and set it with `ygg main PATH`.")
     for root in trees:
         out += summary(ygg, root, cwd)
     print("\n".join(out))

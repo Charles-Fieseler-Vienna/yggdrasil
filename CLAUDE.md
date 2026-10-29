@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This repo is **ygg**, the tool for the user's discourse-graph research trees: the CLI, its web app, and the Claude Code plugin that teaches Claude to work in a tree. It holds no tree itself. The user's main tree is the sister repository `~/Current_work/repos/Yggdrasil-charlie`; project trees live in their projects (e.g. `Cosyne_2027/research/tree/`).
+This repo is **ygg**, the tool for the user's discourse-graph research trees: the CLI, its web app, and the Claude Code plugin that teaches Claude to work in a tree. It holds no tree itself. The user's main tree is the one `ygg main` prints; project trees live in their projects (e.g. `my-project/research/tree/`).
 
 - `DESIGN.md` specifies what ygg does: the format, the commands, the web app's behaviour, the plugin. Keep it in step with any change in behaviour.
 - `DEVELOPING.md` is how to work on it: layout, tests and checks, versions, the code of the CLI, hooks and web app, the web app's working loop, and trial rounds. Read it before changing anything.

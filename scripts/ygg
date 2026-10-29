@@ -24,7 +24,7 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
-__version__ = "0.5.16"  # the tool; keep .claude-plugin/plugin.json in step
+__version__ = "0.5.18"  # the tool; keep .claude-plugin/plugin.json in step
 # The tree format. Bump it when a tree written by this ygg could fail the checks of an older one, and
 # teach `ygg init` to upgrade older trees; ygg.json records each tree's format as spec_version.
 SPEC_VERSION = 2  # 2: notes in no project are allowed (a warning, not an error)
@@ -422,6 +422,11 @@ class Vault:
             for n in pool.values():
                 if n.uid == name or (pool is self.nodes and n.content == name):
                     return n
+        # a whole name in other capitals ("BarlowTrack" for the project barlowtrack) before any part of one
+        hits = [n for pool in pools for n in pool.values()
+                if name.lower() in (n.stem.lower(), (n.content or "").lower() if pool is self.nodes else "")]
+        if len(hits) == 1:
+            return hits[0]
         hits = [n for pool in pools for n in pool.values() if name.lower() in n.stem.lower()]
         if len(hits) == 1:
             return hits[0]
@@ -811,6 +816,44 @@ def read_json(path):
         return {}
 
 
+# --- The user's main tree --------------------------------------------------------------
+
+def config_path():
+    """The user's ygg settings, $XDG_CONFIG_HOME/ygg/config.json (by default ~/.config/ygg/config.json)."""
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "ygg" / "config.json"
+
+
+def main_tree():
+    """The user's main tree: $YGG_MAIN_TREE, else the one `ygg main PATH` set; None if neither is."""
+    config = read_json(config_path())
+    v = os.environ.get("YGG_MAIN_TREE") or (config.get("main_tree") if isinstance(config, dict) else None)
+    return Path(v).expanduser().resolve() if isinstance(v, str) and v.strip() else None
+
+
+def main_tree_or_die(instead=""):
+    """The main tree; dies if none is set or it is not a tree any more, saying what to pass `instead`."""
+    root = main_tree()
+    if not root:
+        die(NO_MAIN + (", or " + instead if instead else ""))
+    if not (root / "ygg.json").exists():
+        die("the main tree, %s, is not a ygg tree (moved?); set it again with `ygg main PATH`%s"
+            % (root, ", or " + instead if instead else ""))
+    return root
+
+
+def set_main_tree(root):
+    config = read_json(config_path())
+    config = config if isinstance(config, dict) else {}
+    config["main_tree"] = str(root)
+    write_json(config_path(), config)
+    print("main tree: %s (saved in %s)" % (root, config_path()))
+    if os.environ.get("YGG_MAIN_TREE"):
+        warn("YGG_MAIN_TREE is set and overrides it: %s" % os.environ["YGG_MAIN_TREE"])
+
+
+NO_MAIN = "no main tree is set; set it once with `ygg main PATH` (or make one with `ygg init PATH --main`)"
+
+
 # --- Commands ------------------------------------------------------------------
 
 def open_vault(a):
@@ -958,6 +1001,8 @@ def cmd_init(a):
     write_json(tn_path, tn)
     print("initialised %s (spec version %d)" % (root, SPEC_VERSION))
     print("Open it as an Obsidian vault and install the Discourse Graph and TaskNotes community plugins.")
+    if a.main:
+        set_main_tree(root)
     if a.project:
         a.vault, a.type, a.title, a.root, a.body = str(root), "project", a.project, [], None
         cmd_new(a)
@@ -1045,6 +1090,10 @@ def cmd_set(a):
         v for k, v in vars(a).items() if k not in ("note", "out_of_scope", "in_scope", "func", "cmd", "vault"))
     priority_only = a.priority and not any(
         v for k, v in vars(a).items() if k not in ("note", "priority", "func", "cmd", "vault"))
+    # dateModified dates a change to what the note records; a change to its work state alone leaves it, so
+    # steering (a priority set in the web app) does not count as having put the notebook's findings in the notes
+    work_state_only = not any(v for k, v in vars(a).items() if k not in (
+        "note", "priority", "status", "scheduled", "out_of_scope", "in_scope", "func", "cmd", "vault"))
     if priority_only and n.status == "done":
         die("[[%s]] is done and frozen, and a done note is on no priority list (`ygg report`, the session hook "
             "and the web app list only notes not done), so its priority no longer matters" % n.stem)
@@ -1062,7 +1111,8 @@ def cmd_set(a):
             n.set("status", a.status)
             n.set("completedDate", None)  # reopening a note done since the last commit
         apply_fields(n, a)
-        touch(n)
+        if not work_state_only:
+            touch(n)
     if a.body:
         n.body = read_body(a.body)
     check_note(n, vault)
@@ -1596,6 +1646,10 @@ def cmd_log(a):
     if not text:
         die("give the entry as an argument, or with --body FILE (or - for stdin)")
     head = append_entry(vault.root, tag, text)
+    if tag.lower() not in NOT_FINDINGS:
+        late = undistilled(vault)
+        if len(late) >= DISTIL_AFTER and len(late) % DISTIL_AFTER == 0:
+            print(distil_line(late).lstrip("- "))
     line = None if qid else prose_decision(text, vault.root)
     if line:
         warn("this entry leaves a decision to the user in prose (%r). Ask it as a question, so it waits for "
@@ -1614,6 +1668,56 @@ def cmd_log(a):
     if qid:
         print("question id: %s (it waits on the user, in the report, the session hook and the web app; "
               "`ygg answer %s -m TEXT` answers it)" % (qid, qid))
+
+
+# Findings kept only in the notebook: in long sessions the tree went days without a change while results
+# that settled or overturned its notes piled up as entries. Entries of these tags are not findings.
+NOT_FINDINGS = {"run", "handoff", "agenda order", "todo", "ask", "answer", "issue", "resolved", "done",
+                "dropped", "seed", "brainstorm"}
+DISTIL_AFTER = 8  # findings newer than any change to the notes before ygg says to distil them
+
+
+def entry_time(when):
+    """A notebook stamp, 'YYYY-MM-DD HH:MM' in the writer's local time, as a time in this machine's zone."""
+    return datetime.datetime.strptime(when, "%Y-%m-%d %H:%M" if " " in when else "%Y-%m-%d").astimezone()
+
+
+def stamp_time(v):
+    """A note's ISO time stamp as an aware time (local if it has no offset), or None."""
+    try:
+        t = datetime.datetime.fromisoformat(str(v).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.astimezone()
+
+
+def undistilled(vault):
+    """Entries since the last handoff that record findings (decisions, results, surprises, dead ends) and are
+    newer than the last change to what the notes record (dateModified, which work-state changes leave alone)
+    and the last relation added, oldest first. Times are compared as times, so notes changed in another zone
+    (a cluster or cloud session in UTC) count when they happened."""
+    changes = [stamp_time(n.meta.get("dateModified")) for n in vault.nodes.values()]
+    changes += [datetime.datetime.fromtimestamp(r["created"] / 1000).astimezone()
+                for r in vault.relations.values() if isinstance(r.get("created"), (int, float))]
+    last = max((t for t in changes if t), default=None)
+    entries = notebook_entries(vault.root)
+    hand = [i for i, e in enumerate(entries) if "handoff" in e["tag"].lower()]
+    entries = entries[hand[-1] + 1:] if hand else entries
+    return [e for e in entries if e["tag"].lower() not in NOT_FINDINGS and (not last or entry_time(e["when"]) > last)]
+
+
+def distil_line(late):
+    return ("- %d notebook entries (decisions, results, surprises), from %s to %s, are newer than any change to "
+            "the notes: distil what has settled into the tree now, while the details are known (the ygg:handoff "
+            "skill, step 2): fill in and finish Evidence, revise open Claims in place, and where a finding shows "
+            "a recorded result was wrong, log an issue on that note (`ygg log \"...\" --issue --affects NOTE`). "
+            "Hunches stay in the notebook." % (len(late), late[0]["when"], late[-1]["when"]))
+
+
+def distil_reminder(vault):
+    """The distil line once enough findings wait, else None: for the session hook, the report and the web app."""
+    late = undistilled(vault)
+    return distil_line(late) if len(late) >= DISTIL_AFTER else None
 
 
 def append_entry(root, tag, text):
@@ -2176,6 +2280,8 @@ def cmd_report(a):
         print()
     found = run_states(vault)
     line, action = runs_summary(found), needs_action(vault, found)
+    distil = distil_reminder(vault)
+    action += [distil] if distil else []
     if line:
         print("## Runs\n%s\n" % line)
     if action:
@@ -2261,10 +2367,14 @@ def origin_key(n):
 
 
 def cmd_compress(a):
+    if not a.vault and main_tree():  # compression goes into the main tree, from wherever it is run
+        a.vault = str(main_tree_or_die("pass --vault TREE"))
     target = open_vault(a)
     src = Path(a.tree).resolve()
     if not src.exists():
         die("%s does not exist" % src)
+    if src == target.root:
+        die("%s is the tree to compress into; name the project's tree" % src)
     top, commit, dirty = repo_state(src)
     ref = "%s@%s:%s" % (top.name, commit, src.relative_to(top).as_posix() or ".")
     same_tree = lambda n: re.sub(r"@\w+:", ":", str(n.meta.get("tree", ""))) == re.sub(r"@\w+:", ":", ref)
@@ -2308,6 +2418,16 @@ def cmd_compress(a):
     print("\nNext: create the compressed Questions, Claims and Evidence with `ygg new`, deriving the "
           "Evidence from this Source (and its Dataset) with --link derived-from:..., then add the roots "
           "to the project note in ideas/.")
+
+
+def cmd_main(a):
+    if a.path:
+        root = Path(a.path).expanduser().resolve()
+        if not (root / "ygg.json").exists():
+            die("%s is not a ygg tree; make it one with `ygg init %s --main`" % (root, a.path))
+        set_main_tree(root)
+        return
+    print(main_tree_or_die())
 
 
 def scope_report(project):
@@ -2408,7 +2528,9 @@ def since_compression(project, top, src, last):
 
 def cmd_seed(a):
     target = open_vault(a)
-    main_root = find_vault(a.source)
+    main_root = find_vault(a.source) if a.source else main_tree_or_die("pass --from TREE")
+    if main_root == target.root:
+        die("%s is this tree; seed from another one (--from TREE)" % main_root)
     main = Vault(main_root)
     top, commit, dirty = repo_state(main_root, "tree", "relations.json")
     if dirty and not a.dry_run:
@@ -2671,6 +2793,10 @@ def cmd_order(a):
                 for s in stuck))
         text = ("What a session looks at first, in this order; the rest follow in the default order:\n\n"
                 + "\n".join("%d. %s" % (i + 1, wikilink(s)) for i, s in enumerate(stems)))
+    before = agenda_order(vault.root)
+    if (before["stems"] if before else []) == ([] if a.default else stems):
+        print("%s: the order is unchanged; nothing written" % NOTEBOOK)
+        return
     head = append_entry(vault.root, ORDER_TAG, text)
     print("%s: %s" % (NOTEBOOK, head))
 
@@ -2726,6 +2852,7 @@ def main(argv=None):
     p = sub.add_parser("init", help="make PATH a ygg tree: folders, plugin settings, templates")
     p.add_argument("path", nargs="?", default=".")
     p.add_argument("--project", help="also create a project note with this title")
+    p.add_argument("--main", action="store_true", help="also make it your main tree (see `ygg main`)")
     p.add_argument("--id", help=argparse.SUPPRESS)
     p.add_argument("--created", help=argparse.SUPPRESS)
     p.set_defaults(func=cmd_init)
@@ -2854,7 +2981,13 @@ def main(argv=None):
     p = sub.add_parser("check", help="validate the tree; exit 1 on any error")
     p.set_defaults(func=cmd_check)
 
-    p = sub.add_parser("compress", help="outline a project's detailed tree and record it as a Source here")
+    p = sub.add_parser("main", help="print your main tree, the one projects are seeded from and compressed into; "
+                       "with PATH, set it")
+    p.add_argument("path", nargs="?", help="the tree to make your main tree")
+    p.set_defaults(func=cmd_main)
+
+    p = sub.add_parser("compress", help="outline a project's detailed tree and record it as a Source in the main "
+                       "tree (or --vault)")
     p.add_argument("tree", help="the project's ygg tree, or any committed file or folder")
     p.add_argument("--title", help="Source title; default '<repository> research tree'")
     p.add_argument("--dry-run", dest="dry_run", action="store_true", help="outline only; record nothing")
@@ -2863,7 +2996,7 @@ def main(argv=None):
     p = sub.add_parser("seed", help="copy notes and everything under them from another tree (usually the "
                        "main tree) into this one, as roots of a project")
     p.add_argument("notes", nargs="+", help="the notes to start from, named in the other tree")
-    p.add_argument("--from", dest="source", required=True, help="the tree to copy from (any folder in it)")
+    p.add_argument("--from", dest="source", help="the tree to copy from (any folder in it); default: the main tree")
     p.add_argument("--project", help="the project here to add them to; default: the only one")
     p.add_argument("--depth", type=int, help="how many steps down to copy (default: everything under them)")
     p.add_argument("--dry-run", dest="dry_run", action="store_true", help="list what would be copied")

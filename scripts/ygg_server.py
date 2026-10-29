@@ -68,6 +68,7 @@ def overview_json(ygg, vault):
             "asks": [ask(q) for q in ygg.all_asks(root) if not q["answer"]],
             "answered": [ask(q) for q in ygg.asks_answered_since_handoff(root)],
             "runs": ygg.runs_summary(found), "needs_action": ygg.needs_action(vault, found),
+            "distil": ygg.distil_reminder(vault),
             "handoff": hand[-1] if hand else None,
             "entries": [{"when": e["when"], "tag": e["tag"], "first": (e["text"].splitlines() or [""])[0][:160]}
                         for e in entries[-RECENT_ENTRIES:]][::-1],

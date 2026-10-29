@@ -42,6 +42,24 @@ def test_session_start_finds_a_project_tree(tmp_path):
     assert "Runs since the last handoff or still running: 1 running." in out and "`ygg runs`" in out
 
 
+def test_session_start_says_where_the_main_tree_is(tmp_path):
+    root = make_repo(tmp_path / "proj", "research/tree")
+    out = hook("session_start.py", {"cwd": str(tmp_path / "proj")})
+    assert "No main tree is set" in out and "`ygg main PATH`" in out
+    main = make_repo(tmp_path / "main")
+    run("main", main)
+    out = hook("session_start.py", {"cwd": str(tmp_path / "proj")})
+    assert "The user's main tree, which projects are seeded from and compressed into, is `%s`." % main.resolve() in out
+    out = hook("session_start.py", {"cwd": str(main)})
+    assert "`.` is the user's main tree" in out and "No main tree" not in out
+    main.rename(tmp_path / "moved")
+    out = hook("session_start.py", {"cwd": str(tmp_path / "proj")})
+    assert "which is not a ygg tree any more" in out and "`ygg main PATH`" in out
+    (tmp_path / "config" / "ygg" / "config.json").write_text("[]")  # garbled: as if none were set
+    out = hook("session_start.py", {"cwd": str(root)})
+    assert "No main tree is set" in out
+
+
 def test_session_start_flags_a_decision_left_in_prose(tmp_path):
     root = make_repo(tmp_path / "proj")
     run("--vault", root, "log", "--ask", "Rerun on the new export?")

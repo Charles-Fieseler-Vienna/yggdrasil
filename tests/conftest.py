@@ -2,13 +2,22 @@
 import json
 import subprocess
 import sys
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 YGG = ROOT / "scripts" / "ygg"
-MAIN_TREE = Path.home() / "Current_work" / "repos" / "Yggdrasil-charlie"
+# The user's real main tree, if `ygg main` set one here (read before the fixture below hides it)
+MAIN_TREE = SourceFileLoader("ygg_conftest", str(YGG)).load_module().main_tree() or Path("/nonexistent")
+
+
+@pytest.fixture(autouse=True)
+def own_config(tmp_path, monkeypatch):
+    """Every test gets its own ygg settings, with no main tree, so none reads or changes the user's."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.delenv("YGG_MAIN_TREE", raising=False)
 
 
 def run(*args, cwd=None, ok=True, stdin=None):

@@ -139,6 +139,7 @@ function Overview({ G, onReveal, onAction }) {
       ${o.runs || o.needs_action.length ? section("Runs", null, html`
         ${o.runs ? html`<p>${o.runs.replace(" `ygg runs` lists them.", "")}</p>` : null}
         ${o.needs_action.length ? html`<ul>${o.needs_action.map((x, i) => html`<li key=${i}>${x.replace(/^- /, "")}</li>`)}</ul>` : null}`) : null}
+      ${o.distil ? section("In the notebook, not yet in the tree", null, html`<p>${o.distil.replace(/^- /, "")}</p>`) : null}
       ${o.handoff ? section("Last handoff, " + o.handoff.when, null, html`
         <div className="markdown" onClick=${(e) => {
           const a = e.target.closest("a.wikilink");

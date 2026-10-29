@@ -1,15 +1,16 @@
 ---
 name: compress
-description: Compress a project's detailed ygg tree into the main tree (Yggdrasil-charlie) as a few generalizable Questions, Claims and Evidence, mapping notes seeded from the main tree back to their originals. Use when the user wants to bring a project's or phase's results back to the main tree, or to compress a project tree again after more work.
+description: Compress a project's detailed ygg tree into the user's main tree as a few generalizable Questions, Claims and Evidence, mapping notes seeded from the main tree back to their originals. Use when the user wants to bring a project's or phase's results back to the main tree, or to compress a project tree again after more work.
 ---
 
 # Compressing a project tree
 
 With the user, once the project tree is committed. Follow the `ygg:tree` skill (all writes through `ygg`).
 
-Run `ygg compress PATH/TO/project/tree --dry-run` in the main tree to read the outline with the user, then
-without `--dry-run` to record the tree as a Source at its commit.
-Then write the compressed nodes: about one Question per figure, one Claim per one to three panels, each Claim
+The main tree is the one `ygg main` prints; if none is set, ask the user which it is and set it with
+`ygg main PATH`. Run `ygg compress PATH/TO/project/tree --dry-run` (from anywhere: it records into the main
+tree) to read the outline with the user, then without `--dry-run` to record the tree as a Source at its
+commit. Then write the compressed nodes, in the main tree (`cd "$(ygg main)"`, or `--vault "$(ygg main)"`): about one Question per figure, one Claim per one to three panels, each Claim
 with its own Evidence derived from the tree Source and the Dataset. Keep generalizable results, dead ends and
 open questions; leave narrow methods in the project tree. Add roots with `ygg set PROJECT --add-root NOTE`.
 The outline's **Papers** list says which papers already have a Source in the main tree (derive from that one;
