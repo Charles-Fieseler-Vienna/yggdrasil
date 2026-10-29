@@ -234,6 +234,7 @@ __marimo__/
 *.h5
 *.nwb
 .obsidian/workspace*.json
+!docs/*.png
 
 # Editor, IDE and shell files (some are sandbox mounts in Claude Code sessions)
 .idea

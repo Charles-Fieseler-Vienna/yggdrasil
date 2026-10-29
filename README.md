@@ -22,9 +22,11 @@ Mostly the agent writes the tree and you steer it. ygg comes in three parts:
 - **`ygg serve`**, a local web app that draws the tree and shows what the agent will be told to do next. There you answer its questions, reorder its priorities, tick to-dos and add notes.
 - **A [Claude Code](https://claude.com/claude-code) plugin** that teaches Claude to work in a tree. When a session starts in a tree, it is told where the work stands (the last handoff, what is running, what waits on you). Skills cover adding papers (via Zotero), brainstorming, starting a project, handing off at the end of a session, and compressing a project.
 
+![The web app: a question, the claim that addresses it, the evidence supporting that claim and the datasets it is derived from; the selected claim's fields, open issues and body in the side panel](docs/webapp_screenshot.png)
+
 ### Quick start
 
-You need Python 3.10+, [uv](https://docs.astral.sh/uv/) (for the web app) and, for the agent side, Claude Code.
+You need Python 3.10+, [uv](https://docs.astral.sh/uv/) (for the web app) and, for the agent side, Claude Code. The paper skills work best with a [Zotero](https://www.zotero.org) MCP server connected to Claude; without one they fall back to DOIs. Obsidian, with the Discourse Graph and TaskNotes plugins, is optional.
 
 ```bash
 claude plugin marketplace add Charles-Fieseler-Vienna/yggdrasil

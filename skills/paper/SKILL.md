@@ -14,8 +14,9 @@ section Papers. All writes go through `ygg` (in a project tree, `ygg --vault PAT
 - Find it in the user's library: `zotero_search_items` by title or author, or `zotero_semantic_search` by
   topic. Get its **item key** (8 characters, e.g. `2Q9B3YAH`) and DOI with `zotero_get_item_metadata`.
 - Not in the library: find the DOI (OpenAlex, Crossref or arXiv) and add it with `zotero_add_item` by DOI.
-  If adding fails, record it in `zotero_pending_adds.md` as the `zotero-research` skill describes, and
-  create the Source with the DOI only; add `--zotero` later with `ygg set`.
+  If adding fails (or no Zotero tools are connected), tell the user, who can add it by hand (a
+  `zotero-research` skill, if installed, says where to record it), and create the Source with the DOI only;
+  add `--zotero` later with `ygg set`.
 - Check the metadata against the DOI. Never invent a key or DOI, and don't fill in authors, year or venue
   from memory: if Zotero lacks them, take them from the DOI record (Crossref, OpenAlex), or leave them out
   and say so.
